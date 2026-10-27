@@ -1,0 +1,7 @@
+[package]
+name = "typebird"
+version = "0.1.0"
+edition = "2024"
+description = "voice typing for linux. one binary, one model, every app."
+
+[dependencies]
