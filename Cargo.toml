@@ -5,3 +5,4 @@ edition = "2024"
 description = "voice typing for linux. one binary, one model, every app."
 
 [dependencies]
+cpal = "0.15"
