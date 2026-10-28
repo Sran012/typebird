@@ -1,6 +1,8 @@
 // audio capture. cpal gives us a stream, we grab samples into a buffer.
-// 16khz mono s16 is what whisper wants, so we ask for that.
+// 16khz mono s16 is what whisper wants. write it to a wav file so we can
+// feed it to whisper-cli next.
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+use hound::{WavSpec, WavWriter};
 use std::sync::{Arc, Mutex};
 
 fn main() {
@@ -37,5 +39,19 @@ fn main() {
     drop(stream);
 
     let buf = samples.lock().unwrap();
-    println!("captured {} samples ({}s)", buf.len(), buf.len() as f64 / 16000.0);
+    println!("captured {} samples", buf.len());
+
+    // write wav
+    let spec = WavSpec {
+        channels: 1,
+        sample_rate: 16000,
+        bits_per_sample: 16,
+        sample_format: hound::SampleFormat::Int,
+    };
+    let mut writer = WavWriter::create("/tmp/typebird-test.wav", spec).expect("wav create failed");
+    for &s in buf.iter() {
+        writer.write_sample(s).unwrap();
+    }
+    writer.finalize().unwrap();
+    println!("wrote /tmp/typebird-test.wav");
 }

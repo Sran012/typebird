@@ -6,3 +6,4 @@ description = "voice typing for linux. one binary, one model, every app."
 
 [dependencies]
 cpal = "0.15"
+hound = "3.5"
