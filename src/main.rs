@@ -1,8 +1,8 @@
-// audio capture. cpal gives us a stream, we grab samples into a buffer.
-// 16khz mono s16 is what whisper wants. write it to a wav file so we can
-// feed it to whisper-cli next.
+// audio capture + transcription. record 3s, write wav, shell out to whisper-cli.
+// next step: type the result via uinput.
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use hound::{WavSpec, WavWriter};
+use std::process::Command;
 use std::sync::{Arc, Mutex};
 
 fn main() {
@@ -41,17 +41,29 @@ fn main() {
     let buf = samples.lock().unwrap();
     println!("captured {} samples", buf.len());
 
-    // write wav
+    let wav_path = "/tmp/typebird-test.wav";
     let spec = WavSpec {
         channels: 1,
         sample_rate: 16000,
         bits_per_sample: 16,
         sample_format: hound::SampleFormat::Int,
     };
-    let mut writer = WavWriter::create("/tmp/typebird-test.wav", spec).expect("wav create failed");
+    let mut writer = WavWriter::create(wav_path, spec).expect("wav create failed");
     for &s in buf.iter() {
         writer.write_sample(s).unwrap();
     }
     writer.finalize().unwrap();
-    println!("wrote /tmp/typebird-test.wav");
+    println!("wrote {}", wav_path);
+
+    // transcribe
+    let model = "/home/sujal/.local/share/voxd/models/ggml-base.en.bin";
+    let out = Command::new("whisper-cli")
+        .args(["-m", model, "-f", wav_path, "-l", "en", "-t", "4", "-nt"])
+        .output()
+        .expect("failed to run whisper-cli");
+
+    let text = String::from_utf8_lossy(&out.stdout);
+    println!("--- transcription ---");
+    println!("{}", text.trim());
+    println!("--- end ---");
 }
