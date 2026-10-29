@@ -1,69 +1,61 @@
-// audio capture + transcription. record 3s, write wav, shell out to whisper-cli.
-// next step: type the result via uinput.
-use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use hound::{WavSpec, WavWriter};
-use std::process::Command;
-use std::sync::{Arc, Mutex};
+// uinput typing test. create a virtual keyboard, type "hello", done.
+// us qwerty keycode map. real layout handling comes later.
+use evdev::uinput::{VirtualDevice, VirtualDeviceBuilder};
+use evdev::{AttributeSet, EventType, Key};
+use std::thread;
+use std::time::Duration;
+
+fn char_to_key(c: char) -> Option<Key> {
+    match c {
+        'a' => Some(Key::KEY_A), 'b' => Some(Key::KEY_B), 'c' => Some(Key::KEY_C),
+        'd' => Some(Key::KEY_D), 'e' => Some(Key::KEY_E), 'f' => Some(Key::KEY_F),
+        'g' => Some(Key::KEY_G), 'h' => Some(Key::KEY_H), 'i' => Some(Key::KEY_I),
+        'j' => Some(Key::KEY_J), 'k' => Some(Key::KEY_K), 'l' => Some(Key::KEY_L),
+        'm' => Some(Key::KEY_M), 'n' => Some(Key::KEY_N), 'o' => Some(Key::KEY_O),
+        'p' => Some(Key::KEY_P), 'q' => Some(Key::KEY_Q), 'r' => Some(Key::KEY_R),
+        's' => Some(Key::KEY_S), 't' => Some(Key::KEY_T), 'u' => Some(Key::KEY_U),
+        'v' => Some(Key::KEY_V), 'w' => Some(Key::KEY_W), 'x' => Some(Key::KEY_X),
+        'y' => Some(Key::KEY_Y), 'z' => Some(Key::KEY_Z),
+        ' ' => Some(Key::KEY_SPACE),
+        _ => None,
+    }
+}
+
+fn type_text(dev: &mut VirtualDevice, text: &str) {
+    for c in text.chars() {
+        if let Some(key) = char_to_key(c.to_ascii_lowercase()) {
+            let shift = c.is_uppercase();
+            if shift {
+                dev.emit(&[evdev::InputEvent::new(EventType::KEY, Key::KEY_LEFTSHIFT.0, 1)]).unwrap();
+            }
+            dev.emit(&[evdev::InputEvent::new(EventType::KEY, key.0, 1)]).unwrap();
+            dev.emit(&[evdev::InputEvent::new(EventType::KEY, key.0, 0)]).unwrap();
+            if shift {
+                dev.emit(&[evdev::InputEvent::new(EventType::KEY, Key::KEY_LEFTSHIFT.0, 0)]).unwrap();
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+    }
+    // sync
+    dev.emit(&[evdev::InputEvent::new(EventType::SYNCHRONIZATION, 0, 0)]).unwrap();
+}
 
 fn main() {
-    let host = cpal::default_host();
-    let device = host.default_input_device().expect("no input device");
-    println!("using mic: {}", device.name().unwrap_or_default());
-
-    let config = cpal::StreamConfig {
-        channels: 1,
-        sample_rate: cpal::SampleRate(16000),
-        buffer_size: cpal::BufferSize::Default,
-    };
-
-    let samples: Arc<Mutex<Vec<i16>>> = Arc::new(Mutex::new(Vec::new()));
-    let samples_clone = samples.clone();
-
-    let stream = device
-        .build_input_stream(
-            &config,
-            move |data: &[f32], _| {
-                let mut buf = samples_clone.lock().unwrap();
-                for &s in data {
-                    buf.push((s * 32767.0) as i16);
-                }
-            },
-            |err| eprintln!("stream error: {}", err),
-            None,
-        )
-        .expect("failed to build stream");
-
-    stream.play().expect("failed to play");
-    println!("recording 3s...");
-    std::thread::sleep(std::time::Duration::from_secs(3));
-    drop(stream);
-
-    let buf = samples.lock().unwrap();
-    println!("captured {} samples", buf.len());
-
-    let wav_path = "/tmp/typebird-test.wav";
-    let spec = WavSpec {
-        channels: 1,
-        sample_rate: 16000,
-        bits_per_sample: 16,
-        sample_format: hound::SampleFormat::Int,
-    };
-    let mut writer = WavWriter::create(wav_path, spec).expect("wav create failed");
-    for &s in buf.iter() {
-        writer.write_sample(s).unwrap();
+    let mut keys = AttributeSet::<Key>::new();
+    for k in 0..256u16 {
+        keys.insert(Key(k));
     }
-    writer.finalize().unwrap();
-    println!("wrote {}", wav_path);
 
-    // transcribe
-    let model = "/home/sujal/.local/share/voxd/models/ggml-base.en.bin";
-    let out = Command::new("whisper-cli")
-        .args(["-m", model, "-f", wav_path, "-l", "en", "-t", "4", "-nt"])
-        .output()
-        .expect("failed to run whisper-cli");
+    let mut dev = VirtualDeviceBuilder::new()
+        .unwrap()
+        .name("typebird-kbd")
+        .with_keys(&keys)
+        .unwrap()
+        .build()
+        .unwrap();
 
-    let text = String::from_utf8_lossy(&out.stdout);
-    println!("--- transcription ---");
-    println!("{}", text.trim());
-    println!("--- end ---");
+    println!("typing 'hello world' via uinput in 2s...");
+    thread::sleep(Duration::from_secs(2));
+    type_text(&mut dev, "hello world");
+    println!("done");
 }
