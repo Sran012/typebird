@@ -1,6 +1,7 @@
 // the daemon. long-lived process, holds the socket, manages state.
 // commands: toggle, start, stop, cancel, state, info, key <name>
 // protocol: newline-delimited text over unix socket. response is a line.
+// streaming: records in chunks, transcribes each, types as they come.
 use crate::audio;
 use crate::inject;
 use crate::transcribe;
@@ -9,6 +10,7 @@ use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::sync::{Arc, Mutex, atomic::{AtomicBool, Ordering}};
 use std::thread;
+use std::time::{Duration, Instant};
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum State { Ready, Listening, Transcribing }
@@ -34,7 +36,6 @@ pub fn run() {
     println!("typebird daemon listening on {}", path);
 
     let state = Arc::new(Mutex::new(State::Ready));
-    let samples: Arc<Mutex<Vec<i16>>> = Arc::new(Mutex::new(Vec::new()));
     let stop_flag = Arc::new(AtomicBool::new(false));
     let rec_handle: Arc<Mutex<Option<thread::JoinHandle<()>>>> = Arc::new(Mutex::new(None));
 
@@ -42,10 +43,9 @@ pub fn run() {
         match stream {
             Ok(s) => {
                 let state = state.clone();
-                let samples = samples.clone();
                 let stop_flag = stop_flag.clone();
                 let rec_handle = rec_handle.clone();
-                thread::spawn(move || handle_client(s, state, samples, stop_flag, rec_handle));
+                thread::spawn(move || handle_client(s, state, stop_flag, rec_handle));
             }
             Err(e) => eprintln!("accept error: {}", e),
         }
@@ -55,7 +55,6 @@ pub fn run() {
 fn handle_client(
     mut stream: UnixStream,
     state: Arc<Mutex<State>>,
-    samples: Arc<Mutex<Vec<i16>>>,
     stop_flag: Arc<AtomicBool>,
     rec_handle: Arc<Mutex<Option<thread::JoinHandle<()>>>>,
 ) {
@@ -72,13 +71,11 @@ fn handle_client(
         "start" => {
             let mut s = state.lock().unwrap();
             if *s == State::Ready {
-                samples.lock().unwrap().clear();
                 stop_flag.store(false, Ordering::Relaxed);
                 let stop = stop_flag.clone();
-                let samples = samples.clone();
+                let state = state.clone();
                 let h = thread::spawn(move || {
-                    let buf = audio::record_until_stop(stop);
-                    *samples.lock().unwrap() = buf;
+                    recording_loop(stop, state);
                 });
                 *rec_handle.lock().unwrap() = Some(h);
                 *s = State::Listening;
@@ -88,47 +85,26 @@ fn handle_client(
             }
         }
         "stop" => {
-            let mut s = state.lock().unwrap();
-            if *s == State::Listening {
-                stop_flag.store(true, Ordering::Relaxed);
-                // join recording thread
-                if let Some(h) = rec_handle.lock().unwrap().take() {
-                    let _ = h.join();
+            {
+                let mut s = state.lock().unwrap();
+                if *s != State::Listening {
+                    drop(s);
+                    let _ = writeln!(stream, "not listening");
+                    return;
                 }
                 *s = State::Transcribing;
-                drop(s); // release lock before transcribing
-
-                // write wav
-                let buf = samples.lock().unwrap().clone();
-                let wav_path = "/tmp/typebird-test.wav";
-                let spec = hound::WavSpec {
-                    channels: 1, sample_rate: 16000, bits_per_sample: 16,
-                    sample_format: hound::SampleFormat::Int,
-                };
-                if let Ok(mut w) = WavWriter::create(wav_path, spec) {
-                    for &s in &buf { let _ = w.write_sample(s); }
-                    let _ = w.finalize();
-                }
-
-                // transcribe
-                let text = transcribe::transcribe(wav_path);
-                println!("transcribed: {}", text);
-
-                // type
-                if !text.is_empty() && text != "[BLANK_AUDIO]" {
-                    inject::type_text(&text);
-                }
-
-                *state.lock().unwrap() = State::Ready;
-                "ok".to_string()
-            } else {
-                "not listening".to_string()
             }
+            stop_flag.store(true, Ordering::Relaxed);
+            if let Some(h) = rec_handle.lock().unwrap().take() {
+                let _ = h.join();
+            }
+            *state.lock().unwrap() = State::Ready;
+            let _ = writeln!(stream, "ok");
+            return;
         }
         "cancel" => {
             stop_flag.store(true, Ordering::Relaxed);
             if let Some(h) = rec_handle.lock().unwrap().take() { let _ = h.join(); }
-            samples.lock().unwrap().clear();
             *state.lock().unwrap() = State::Ready;
             "ok".to_string()
         }
@@ -136,20 +112,21 @@ fn handle_client(
             let cur = *state.lock().unwrap();
             if cur == State::Ready {
                 // start
-                samples.lock().unwrap().clear();
                 stop_flag.store(false, Ordering::Relaxed);
                 let stop = stop_flag.clone();
-                let samples = samples.clone();
+                let state_clone = state.clone();
                 let h = thread::spawn(move || {
-                    let buf = audio::record_until_stop(stop);
-                    *samples.lock().unwrap() = buf;
+                    recording_loop(stop, state_clone);
                 });
                 *rec_handle.lock().unwrap() = Some(h);
                 *state.lock().unwrap() = State::Listening;
                 "listening".to_string()
             } else if cur == State::Listening {
-                // stop + transcribe + type (same as stop)
-                "use stop".to_string()
+                // stop
+                stop_flag.store(true, Ordering::Relaxed);
+                if let Some(h) = rec_handle.lock().unwrap().take() { let _ = h.join(); }
+                *state.lock().unwrap() = State::Ready;
+                "stopped".to_string()
             } else {
                 "busy".to_string()
             }
@@ -159,4 +136,100 @@ fn handle_client(
     };
 
     let _ = writeln!(stream, "{}", resp);
+}
+
+// the recording loop. records in chunks, transcribes each, types as they come.
+// cuts a chunk every ~5s. silence detection comes later.
+fn recording_loop(stop: Arc<AtomicBool>, state: Arc<Mutex<State>>) {
+    use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+
+    let host = cpal::default_host();
+    let device = match host.default_input_device() {
+        Some(d) => d,
+        None => { eprintln!("no input device"); return; }
+    };
+
+    let config = cpal::StreamConfig {
+        channels: 1,
+        sample_rate: cpal::SampleRate(16000),
+        buffer_size: cpal::BufferSize::Default,
+    };
+
+    let samples: Arc<Mutex<Vec<i16>>> = Arc::new(Mutex::new(Vec::new()));
+    let samples_clone = samples.clone();
+
+    let stream = match device.build_input_stream(
+        &config,
+        move |data: &[f32], _| {
+            let mut buf = samples_clone.lock().unwrap();
+            for &s in data {
+                buf.push((s * 32767.0) as i16);
+            }
+        },
+        |err| eprintln!("stream error: {}", err),
+        None,
+    ) {
+        Ok(s) => s,
+        Err(e) => { eprintln!("build stream failed: {}", e); return; }
+    };
+
+    if stream.play().is_err() {
+        eprintln!("failed to play stream");
+        return;
+    }
+
+    let chunk_duration = Duration::from_secs(5);
+    let mut last_chunk = Instant::now();
+
+    while !stop.load(Ordering::Relaxed) {
+        std::thread::sleep(Duration::from_millis(100));
+
+        let now = Instant::now();
+        if now.duration_since(last_chunk) >= chunk_duration {
+            // cut a chunk
+            let chunk: Vec<i16> = {
+                let mut buf = samples.lock().unwrap();
+                let c = buf.clone();
+                buf.clear();
+                c
+            };
+
+            if !chunk.is_empty() {
+                process_chunk(&chunk);
+            }
+            last_chunk = now;
+        }
+    }
+
+    // process remaining samples
+    let remaining: Vec<i16> = {
+        let mut buf = samples.lock().unwrap();
+        let r = buf.clone();
+        buf.clear();
+        r
+    };
+    if !remaining.is_empty() {
+        process_chunk(&remaining);
+    }
+
+    drop(stream);
+}
+
+fn process_chunk(chunk: &[i16]) {
+    if chunk.len() < 8000 { return; } // skip tiny chunks, whisper chokes on them
+    let wav_path = "/tmp/typebird-chunk.wav";
+    let spec = hound::WavSpec {
+        channels: 1, sample_rate: 16000, bits_per_sample: 16,
+        sample_format: hound::SampleFormat::Int,
+    };
+    if let Ok(mut w) = WavWriter::create(wav_path, spec) {
+        for &s in chunk { let _ = w.write_sample(s); }
+        let _ = w.finalize();
+    }
+
+    let text = transcribe::transcribe(wav_path);
+    if !text.is_empty() && text != "[BLANK_AUDIO]" {
+        println!("chunk: {}", text);
+        inject::type_text(&text);
+    }
 }
