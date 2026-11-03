@@ -3,6 +3,7 @@
 mod audio;
 mod daemon;
 mod inject;
+mod seam;
 mod transcribe;
 
 use std::io::{BufRead, BufReader, Write};

@@ -4,6 +4,7 @@
 // streaming: records in chunks, transcribes each, types as they come.
 use crate::audio;
 use crate::inject;
+use crate::seam;
 use crate::transcribe;
 use hound::WavWriter;
 use std::io::{BufRead, BufReader, Write};
@@ -180,6 +181,7 @@ fn recording_loop(stop: Arc<AtomicBool>, state: Arc<Mutex<State>>) {
 
     let chunk_duration = Duration::from_secs(5);
     let mut last_chunk = Instant::now();
+    let mut prev_ended = true; // first chunk starts a sentence
 
     while !stop.load(Ordering::Relaxed) {
         std::thread::sleep(Duration::from_millis(100));
@@ -195,13 +197,13 @@ fn recording_loop(stop: Arc<AtomicBool>, state: Arc<Mutex<State>>) {
             };
 
             if !chunk.is_empty() {
-                process_chunk(&chunk);
+                prev_ended = process_chunk(&chunk, prev_ended, false);
             }
             last_chunk = now;
         }
     }
 
-    // process remaining samples
+    // process remaining samples (last chunk, keep punctuation)
     let remaining: Vec<i16> = {
         let mut buf = samples.lock().unwrap();
         let r = buf.clone();
@@ -209,14 +211,14 @@ fn recording_loop(stop: Arc<AtomicBool>, state: Arc<Mutex<State>>) {
         r
     };
     if !remaining.is_empty() {
-        process_chunk(&remaining);
+        let _ = process_chunk(&remaining, prev_ended, true);
     }
 
     drop(stream);
 }
 
-fn process_chunk(chunk: &[i16]) {
-    if chunk.len() < 8000 { return; } // skip tiny chunks, whisper chokes on them
+fn process_chunk(chunk: &[i16], prev_ended: bool, is_last: bool) -> bool {
+    if chunk.len() < 8000 { return prev_ended; } // skip tiny chunks
     let wav_path = "/tmp/typebird-chunk.wav";
     let spec = hound::WavSpec {
         channels: 1, sample_rate: 16000, bits_per_sample: 16,
@@ -227,9 +229,20 @@ fn process_chunk(chunk: &[i16]) {
         let _ = w.finalize();
     }
 
-    let text = transcribe::transcribe(wav_path);
-    if !text.is_empty() && text != "[BLANK_AUDIO]" {
+    let raw = transcribe::transcribe(wav_path);
+    if raw.is_empty() || raw == "[BLANK_AUDIO]" {
+        return prev_ended;
+    }
+    // seam-hiding
+    let mut text = seam::clean(&raw, prev_ended);
+    // drop trailing punctuation on non-last chunks (short pause between chunks)
+    if !is_last {
+        let t = text.trim_end_matches(['.', '?', '!']).trim().to_string();
+        if !t.is_empty() { text = t; }
+    }
+    if !text.is_empty() {
         println!("chunk: {}", text);
         inject::type_text(&text);
     }
+    seam::ended_sentence(&text)
 }
