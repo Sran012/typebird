@@ -3,6 +3,7 @@
 mod audio;
 mod daemon;
 mod inject;
+mod hotkey;
 mod seam;
 mod transcribe;
 
@@ -40,6 +41,7 @@ fn main() {
         "cancel" => println!("{}", send_cmd("cancel")),
         "state" => println!("{}", send_cmd("state")),
         "info" => println!("{}", send_cmd("info")),
+        "hotkey" => hotkey::setup(args.get(2).map(|s| s.as_str()).unwrap_or("<Super>h")),
         _ => {
             println!("typebird: usage: daemon | toggle | start | stop | cancel | state | info");
         }
