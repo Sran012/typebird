@@ -4,6 +4,8 @@ mod audio;
 mod daemon;
 mod inject;
 mod hotkey;
+mod doctor;
+mod models;
 mod seam;
 mod transcribe;
 
@@ -42,6 +44,11 @@ fn main() {
         "state" => println!("{}", send_cmd("state")),
         "info" => println!("{}", send_cmd("info")),
         "hotkey" => hotkey::setup(args.get(2).map(|s| s.as_str()).unwrap_or("<Super>h")),
+        "doctor" => doctor::run(),
+        "models" => match args.get(2).map(|s| s.as_str()) {
+            Some("get") => models::get(args.get(3).map(|s| s.as_str()).unwrap_or("base.en")),
+            _ => models::list(),
+        },
         _ => {
             println!("typebird: usage: daemon | toggle | start | stop | cancel | state | info");
         }
