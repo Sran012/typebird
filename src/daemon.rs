@@ -35,10 +35,61 @@ pub fn run() {
         Err(e) => { eprintln!("bind failed: {}", e); return; }
     };
     eprintln!("typebird daemon listening on {}", path);
+    eprintln!("hotkey: press F9 to toggle recording");
 
     let state = Arc::new(Mutex::new(State::Ready));
     let stop_flag = Arc::new(AtomicBool::new(false));
     let rec_handle: Arc<Mutex<Option<thread::JoinHandle<()>>>> = Arc::new(Mutex::new(None));
+
+    // hotkey listener: F9 toggles recording
+    let hotkey_state = state.clone();
+    let hotkey_stop = Arc::new(AtomicBool::new(false));
+    let hotkey_rec = rec_handle.clone();
+    let hotkey_samples_stop = Arc::new(AtomicBool::new(false));
+    thread::spawn(move || {
+        let mut devices: Vec<evdev::Device> = Vec::new();
+        if let Ok(entries) = std::fs::read_dir("/dev/input") {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.to_string_lossy().contains("event") {
+                    if let Ok(dev) = evdev::Device::open(&path) {
+                        if dev.supported_keys().map(|k| k.contains(evdev::Key::KEY_F9)).unwrap_or(false) {
+                            devices.push(dev);
+                        }
+                    }
+                }
+            }
+        }
+        if let Some(mut dev) = devices.into_iter().next() {
+            loop {
+                if hotkey_stop.load(Ordering::Relaxed) { break; }
+                if let Ok(events) = dev.fetch_events() {
+                    for ev in events {
+                        if ev.event_type() == evdev::EventType::KEY && ev.code() == evdev::Key::KEY_F9.0 && ev.value() == 1 {
+                            let cur = *hotkey_state.lock().unwrap();
+                            if cur == State::Ready {
+                                hotkey_samples_stop.store(false, Ordering::Relaxed);
+                                let stop = hotkey_samples_stop.clone();
+                                let st = hotkey_state.clone();
+                                let h = thread::spawn(move || {
+                                    recording_loop(stop, st);
+                                });
+                                *hotkey_rec.lock().unwrap() = Some(h);
+                                *hotkey_state.lock().unwrap() = State::Listening;
+                                eprintln!("hotkey: listening");
+                            } else if cur == State::Listening {
+                                hotkey_samples_stop.store(true, Ordering::Relaxed);
+                                if let Some(h) = hotkey_rec.lock().unwrap().take() { let _ = h.join(); }
+                                *hotkey_state.lock().unwrap() = State::Ready;
+                                eprintln!("hotkey: stopped");
+                            }
+                        }
+                    }
+                }
+                thread::sleep(std::time::Duration::from_millis(10));
+            }
+        }
+    });
 
     for stream in listener.incoming() {
         match stream {

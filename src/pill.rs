@@ -1,4 +1,4 @@
-// the overlay pill. bottom-center of screen. always visible.
+// the overlay pill. bottom-center of screen. visible only when active.
 // click to start/stop. never steals focus from the text field.
 use eframe::egui;
 use std::io::{BufRead, BufReader, Write};
@@ -34,23 +34,31 @@ impl eframe::App for PillApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.state = fetch_state();
 
-        // position at bottom center of screen
+        let (color, label, show) = match self.state.as_str() {
+            "listening" => (egui::Color32::from_rgb(220, 50, 50), "● recording", true),
+            "transcribing" => (egui::Color32::from_rgb(255, 165, 0), "transcribing…", true),
+            "disconnected" => (egui::Color32::GRAY, "daemon down", true),
+            _ => (egui::Color32::GRAY, "idle", false),
+        };
+
+        if !show {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
+            ctx.request_repaint_after(std::time::Duration::from_millis(500));
+            return;
+        }
+
+        // position at bottom center
         if let Some(monitor) = ctx.input(|i| i.viewport().monitor_size) {
-            let win_w = 200.0;
+            let win_w = 220.0;
             let x = (monitor.x - win_w) / 2.0;
             let y = monitor.y - 80.0;
             ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(egui::pos2(x, y)));
         }
 
-        let (color, label) = match self.state.as_str() {
-            "listening" => (egui::Color32::from_rgb(220, 50, 50), "● recording"),
-            "transcribing" => (egui::Color32::from_rgb(255, 165, 0), "transcribing…"),
-            "disconnected" => (egui::Color32::GRAY, "daemon down"),
-            _ => (egui::Color32::from_rgb(80, 80, 80), "idle"),
-        };
+        ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
 
         let mut visuals = egui::Visuals::dark();
-        visuals.window_fill = egui::Color32::from_rgba_unmultiplied(20, 20, 20, 220);
+        visuals.window_fill = egui::Color32::from_rgba_unmultiplied(20, 20, 20, 230);
         ctx.set_visuals(visuals);
 
         egui::CentralPanel::default()
@@ -75,7 +83,7 @@ impl eframe::App for PillApp {
 fn main() -> eframe::Result<()> {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([200.0, 32.0])
+            .with_inner_size([220.0, 32.0])
             .with_always_on_top()
             .with_decorations(false)
             .with_transparent(true)
