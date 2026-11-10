@@ -34,7 +34,7 @@ pub fn run() {
         Ok(l) => l,
         Err(e) => { eprintln!("bind failed: {}", e); return; }
     };
-    println!("typebird daemon listening on {}", path);
+    eprintln!("typebird daemon listening on {}", path);
 
     let state = Arc::new(Mutex::new(State::Ready));
     let stop_flag = Arc::new(AtomicBool::new(false));
@@ -247,7 +247,8 @@ fn process_chunk(chunk: &[i16], prev_ended: bool, is_last: bool) -> bool {
         if !t.is_empty() { text = t; }
     }
     if !text.is_empty() {
-        println!("chunk: {}", text);
+        eprintln!("chunk: {}", text);
+        std::thread::sleep(std::time::Duration::from_millis(500));
         inject::type_text(&text);
     }
     seam::ended_sentence(&text)
