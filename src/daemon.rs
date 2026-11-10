@@ -219,6 +219,12 @@ fn recording_loop(stop: Arc<AtomicBool>, state: Arc<Mutex<State>>) {
 
 fn process_chunk(chunk: &[i16], prev_ended: bool, is_last: bool) -> bool {
     if chunk.len() < 8000 { return prev_ended; } // skip tiny chunks
+    // rms check: skip silent chunks, whisper hallucinates on silence
+    let rms: f64 = (chunk.iter().map(|&s| (s as f64).powi(2)).sum::<f64>() / chunk.len() as f64).sqrt() / 32768.0;
+    if rms < 0.005 {
+        eprintln!("chunk: (silent, rms={:.4}, skipping)", rms);
+        return prev_ended;
+    }
     let wav_path = "/tmp/typebird-chunk.wav";
     let spec = hound::WavSpec {
         channels: 1, sample_rate: 16000, bits_per_sample: 16,
