@@ -1,6 +1,5 @@
-// the overlay pill. subscribes to daemon socket, shows state.
-// egui + eframe. native, no webview, no python.
-// small floating window, click-through, never steals focus.
+// the overlay pill. small floating window, bottom-center, click-through.
+// shows only when recording or transcribing. idle = invisible.
 use eframe::egui;
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
@@ -28,25 +27,32 @@ struct PillApp {
 }
 
 impl eframe::App for PillApp {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         self.state = fetch_state();
 
-        // only show when active
         let (color, label) = match self.state.as_str() {
             "listening" => (egui::Color32::from_rgb(220, 50, 50), "● recording"),
             "transcribing" => (egui::Color32::from_rgb(255, 165, 0), "transcribing…"),
             "disconnected" => (egui::Color32::GRAY, "daemon down"),
-            _ => return, // idle: render nothing
+            _ => {
+                // idle: hide window
+                ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
+                ctx.request_repaint_after(std::time::Duration::from_millis(500));
+                return;
+            }
         };
 
+        // show window when active
+        ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+
         let mut visuals = egui::Visuals::dark();
-        visuals.window_fill = egui::Color32::from_rgba_unmultiplied(30, 30, 30, 200);
+        visuals.window_fill = egui::Color32::from_rgba_unmultiplied(20, 20, 20, 220);
         ctx.set_visuals(visuals);
 
         egui::CentralPanel::default()
-            .frame(egui::Frame::none().inner_margin(egui::Margin::symmetric(16.0, 8.0)))
+            .frame(egui::Frame::none().rounding(18.0).inner_margin(egui::Margin::symmetric(14.0, 6.0)))
             .show(ctx, |ui| {
-                ui.colored_label(color, egui::RichText::new(label).size(14.0).strong());
+                ui.colored_label(color, egui::RichText::new(label).size(13.0).strong());
             });
 
         ctx.request_repaint_after(std::time::Duration::from_millis(200));
@@ -56,7 +62,7 @@ impl eframe::App for PillApp {
 fn main() -> eframe::Result<()> {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([160.0, 36.0])
+            .with_inner_size([140.0, 32.0])
             .with_always_on_top()
             .with_decorations(false)
             .with_transparent(true)
