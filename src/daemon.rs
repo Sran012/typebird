@@ -2,7 +2,6 @@
 // commands: toggle, start, stop, cancel, state, info, key <name>
 // protocol: newline-delimited text over unix socket. response is a line.
 // streaming: records in chunks, transcribes each, types as they come.
-use crate::audio;
 use crate::inject;
 use crate::seam;
 use crate::transcribe;
@@ -27,6 +26,149 @@ fn socket_path() -> String {
     format!("{}/typebird.sock", runtime)
 }
 
+// the pill lives next to the daemon binary once installed.
+fn pill_binary() -> std::path::PathBuf {
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            let candidate = dir.join("typebird-pill");
+            if candidate.exists() {
+                return candidate;
+            }
+        }
+    }
+    std::path::PathBuf::from("typebird-pill")
+}
+
+fn ensure_pill() {
+    let running = std::process::Command::new("pgrep")
+        .arg("-x").arg("typebird-pill").output()
+        .map(|o| o.status.success()).unwrap_or(false);
+    if !running {
+        let _ = std::process::Command::new(pill_binary()).spawn();
+    }
+}
+
+fn start_recording(
+    state: &Arc<Mutex<State>>,
+    stop_flag: &Arc<AtomicBool>,
+    rec_handle: &Arc<Mutex<Option<thread::JoinHandle<()>>>>,
+) -> bool {
+    {
+        let mut s = state.lock().unwrap();
+        if *s != State::Ready {
+            return false;
+        }
+        *s = State::Listening;
+    }
+    stop_flag.store(false, Ordering::Relaxed);
+    let stop = stop_flag.clone();
+    let st = state.clone();
+    let h = thread::spawn(move || recording_loop(stop, st));
+    *rec_handle.lock().unwrap() = Some(h);
+    ensure_pill();
+    true
+}
+
+fn stop_recording(
+    state: &Arc<Mutex<State>>,
+    stop_flag: &Arc<AtomicBool>,
+    rec_handle: &Arc<Mutex<Option<thread::JoinHandle<()>>>>,
+) -> bool {
+    {
+        let mut s = state.lock().unwrap();
+        if *s != State::Listening {
+            return false;
+        }
+        *s = State::Transcribing;
+    }
+    stop_flag.store(true, Ordering::Relaxed);
+    if let Some(h) = rec_handle.lock().unwrap().take() {
+        let _ = h.join();
+    }
+    *state.lock().unwrap() = State::Ready;
+    true
+}
+
+fn toggle_recording(
+    state: &Arc<Mutex<State>>,
+    stop_flag: &Arc<AtomicBool>,
+    rec_handle: &Arc<Mutex<Option<thread::JoinHandle<()>>>>,
+) -> &'static str {
+    let cur = *state.lock().unwrap();
+    if cur == State::Ready {
+        if start_recording(state, stop_flag, rec_handle) { "listening" } else { "busy" }
+    } else if cur == State::Listening {
+        if stop_recording(state, stop_flag, rec_handle) { "stopped" } else { "busy" }
+    } else {
+        "busy"
+    }
+}
+
+// global hotkey via evdev: Ctrl+Shift+D toggles recording.
+// listens on every real keyboard. keyd (and similar remappers) grab the
+// physical device and re-emit through a virtual keyboard, so reading all of
+// them is the only way to see the key on every setup.
+fn spawn_hotkey_listener(
+    state: Arc<Mutex<State>>,
+    stop_flag: Arc<AtomicBool>,
+    rec_handle: Arc<Mutex<Option<thread::JoinHandle<()>>>>,
+) {
+    let mut paths: Vec<std::path::PathBuf> = Vec::new();
+    if let Ok(entries) = std::fs::read_dir("/dev/input") {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let is_event = path
+                .file_name()
+                .map(|n| n.to_string_lossy().starts_with("event"))
+                .unwrap_or(false);
+            if !is_event { continue; }
+            let Ok(dev) = evdev::Device::open(&path) else { continue };
+            let name = dev.name().unwrap_or("").to_lowercase();
+            if name.contains("ydotool") || name.contains("uinput") || name.contains("typebird") {
+                continue;
+            }
+            let Some(keys) = dev.supported_keys() else { continue };
+            let full_keyboard = keys.contains(evdev::Key::KEY_A)
+                && keys.contains(evdev::Key::KEY_Z)
+                && keys.contains(evdev::Key::KEY_SPACE)
+                && keys.contains(evdev::Key::KEY_D);
+            if full_keyboard {
+                paths.push(path);
+            }
+        }
+    }
+    eprintln!("hotkey: Ctrl+Shift+D on {} keyboard(s)", paths.len());
+
+    for path in paths {
+        let state = state.clone();
+        let stop_flag = stop_flag.clone();
+        let rec_handle = rec_handle.clone();
+        thread::spawn(move || {
+            let Ok(mut dev) = evdev::Device::open(&path) else { return };
+            let mut ctrl = false;
+            let mut shift = false;
+            loop {
+                if let Ok(events) = dev.fetch_events() {
+                    for ev in events {
+                        if ev.event_type() != evdev::EventType::KEY { continue; }
+                        let code = ev.code();
+                        let val = ev.value();
+                        if code == evdev::Key::KEY_LEFTCTRL.0 || code == evdev::Key::KEY_RIGHTCTRL.0 {
+                            ctrl = val != 0;
+                        } else if code == evdev::Key::KEY_LEFTSHIFT.0 || code == evdev::Key::KEY_RIGHTSHIFT.0 {
+                            shift = val != 0;
+                        } else if code == evdev::Key::KEY_D.0 && val == 1 && ctrl && shift {
+                            let r = toggle_recording(&state, &stop_flag, &rec_handle);
+                            eprintln!("hotkey: {}", r);
+                        }
+                    }
+                }
+                thread::sleep(Duration::from_millis(10));
+            }
+        });
+    }
+}
+
 pub fn run() {
     let path = socket_path();
     let _ = std::fs::remove_file(&path);
@@ -35,68 +177,15 @@ pub fn run() {
         Err(e) => { eprintln!("bind failed: {}", e); return; }
     };
     eprintln!("typebird daemon listening on {}", path);
-    eprintln!("hotkey: press F9 to toggle recording");
+
+    // keep the pill on screen for the whole life of the daemon
+    ensure_pill();
 
     let state = Arc::new(Mutex::new(State::Ready));
     let stop_flag = Arc::new(AtomicBool::new(false));
     let rec_handle: Arc<Mutex<Option<thread::JoinHandle<()>>>> = Arc::new(Mutex::new(None));
 
-    // hotkey listener: F9 toggles recording
-    let hotkey_state = state.clone();
-    let hotkey_stop = Arc::new(AtomicBool::new(false));
-    let hotkey_rec = rec_handle.clone();
-    let hotkey_samples_stop = Arc::new(AtomicBool::new(false));
-    thread::spawn(move || {
-        let mut devices: Vec<evdev::Device> = Vec::new();
-        if let Ok(entries) = std::fs::read_dir("/dev/input") {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.to_string_lossy().contains("event") {
-                    if let Ok(dev) = evdev::Device::open(&path) {
-                        if dev.supported_keys().map(|k| k.contains(evdev::Key::KEY_F9)).unwrap_or(false) {
-                            devices.push(dev);
-                        }
-                    }
-                }
-            }
-        }
-        if let Some(mut dev) = devices.into_iter().next() {
-            loop {
-                if hotkey_stop.load(Ordering::Relaxed) { break; }
-                if let Ok(events) = dev.fetch_events() {
-                    for ev in events {
-                        if ev.event_type() == evdev::EventType::KEY && ev.code() == evdev::Key::KEY_F9.0 && ev.value() == 1 {
-                            let cur = *hotkey_state.lock().unwrap();
-                            if cur == State::Ready {
-                                hotkey_samples_stop.store(false, Ordering::Relaxed);
-                                let stop = hotkey_samples_stop.clone();
-                                let st = hotkey_state.clone();
-                                let h = thread::spawn(move || {
-                                    recording_loop(stop, st);
-                                });
-                                *hotkey_rec.lock().unwrap() = Some(h);
-                                *hotkey_state.lock().unwrap() = State::Listening;
-                                // auto-start pill
-                                let pill_running = std::process::Command::new("pgrep")
-                                    .arg("-f").arg("typebird-pill").output()
-                                    .map(|o| o.status.success()).unwrap_or(false);
-                                if !pill_running {
-                                    let _ = std::process::Command::new("/home/sujal/.local/bin/typebird-pill").spawn();
-                                }
-                                eprintln!("hotkey: listening");
-                            } else if cur == State::Listening {
-                                hotkey_samples_stop.store(true, Ordering::Relaxed);
-                                if let Some(h) = hotkey_rec.lock().unwrap().take() { let _ = h.join(); }
-                                *hotkey_state.lock().unwrap() = State::Ready;
-                                eprintln!("hotkey: stopped");
-                            }
-                        }
-                    }
-                }
-                thread::sleep(std::time::Duration::from_millis(10));
-            }
-        }
-    });
+    spawn_hotkey_listener(state.clone(), stop_flag.clone(), rec_handle.clone());
 
     for stream in listener.incoming() {
         match stream {
@@ -128,46 +217,10 @@ fn handle_client(
             s.as_str().to_string()
         }
         "start" => {
-            let mut s = state.lock().unwrap();
-            if *s == State::Ready {
-                stop_flag.store(false, Ordering::Relaxed);
-                let stop = stop_flag.clone();
-                let state = state.clone();
-                let h = thread::spawn(move || {
-                    recording_loop(stop, state);
-                });
-                *rec_handle.lock().unwrap() = Some(h);
-                *s = State::Listening;
-                // auto-start pill if not already running
-                let pill_running = std::process::Command::new("pgrep")
-                    .arg("-f").arg("typebird-pill").output()
-                    .map(|o| o.status.success()).unwrap_or(false);
-                if !pill_running {
-                    let _ = std::process::Command::new("/home/sujal/.local/bin/typebird-pill")
-                        .spawn();
-                }
-                "ok".to_string()
-            } else {
-                "busy".to_string()
-            }
+            if start_recording(&state, &stop_flag, &rec_handle) { "ok".to_string() } else { "busy".to_string() }
         }
         "stop" => {
-            {
-                let mut s = state.lock().unwrap();
-                if *s != State::Listening {
-                    drop(s);
-                    let _ = writeln!(stream, "not listening");
-                    return;
-                }
-                *s = State::Transcribing;
-            }
-            stop_flag.store(true, Ordering::Relaxed);
-            if let Some(h) = rec_handle.lock().unwrap().take() {
-                let _ = h.join();
-            }
-            *state.lock().unwrap() = State::Ready;
-            let _ = writeln!(stream, "ok");
-            return;
+            if stop_recording(&state, &stop_flag, &rec_handle) { "ok".to_string() } else { "not listening".to_string() }
         }
         "cancel" => {
             stop_flag.store(true, Ordering::Relaxed);
@@ -175,29 +228,7 @@ fn handle_client(
             *state.lock().unwrap() = State::Ready;
             "ok".to_string()
         }
-        "toggle" => {
-            let cur = *state.lock().unwrap();
-            if cur == State::Ready {
-                // start
-                stop_flag.store(false, Ordering::Relaxed);
-                let stop = stop_flag.clone();
-                let state_clone = state.clone();
-                let h = thread::spawn(move || {
-                    recording_loop(stop, state_clone);
-                });
-                *rec_handle.lock().unwrap() = Some(h);
-                *state.lock().unwrap() = State::Listening;
-                "listening".to_string()
-            } else if cur == State::Listening {
-                // stop
-                stop_flag.store(true, Ordering::Relaxed);
-                if let Some(h) = rec_handle.lock().unwrap().take() { let _ = h.join(); }
-                *state.lock().unwrap() = State::Ready;
-                "stopped".to_string()
-            } else {
-                "busy".to_string()
-            }
-        }
+        "toggle" => toggle_recording(&state, &stop_flag, &rec_handle).to_string(),
         "info" => "typebird daemon".to_string(),
         _ => format!("unknown: {}", cmd),
     };
@@ -281,6 +312,7 @@ fn recording_loop(stop: Arc<AtomicBool>, state: Arc<Mutex<State>>) {
     }
 
     drop(stream);
+    let _ = state; // state flips to Ready in stop_recording
 }
 
 fn process_chunk(chunk: &[i16], prev_ended: bool, is_last: bool) -> bool {
