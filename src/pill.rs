@@ -1,5 +1,5 @@
 // the overlay pill. small floating window, bottom-center, click-through.
-// shows only when recording or transcribing. idle = invisible.
+// shows only when recording or transcribing. idle = hidden.
 use eframe::egui;
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
@@ -27,7 +27,7 @@ struct PillApp {
 }
 
 impl eframe::App for PillApp {
-    fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.state = fetch_state();
 
         let (color, label) = match self.state.as_str() {
@@ -35,24 +35,24 @@ impl eframe::App for PillApp {
             "transcribing" => (egui::Color32::from_rgb(255, 165, 0), "transcribing…"),
             "disconnected" => (egui::Color32::GRAY, "daemon down"),
             _ => {
-                // idle: hide window
                 ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
                 ctx.request_repaint_after(std::time::Duration::from_millis(500));
                 return;
             }
         };
 
-        // show window when active
+        // force small size every frame
+        ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(140.0, 32.0)));
         ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
 
         let mut visuals = egui::Visuals::dark();
-        visuals.window_fill = egui::Color32::from_rgba_unmultiplied(20, 20, 20, 220);
+        visuals.window_fill = egui::Color32::from_rgba_unmultiplied(25, 25, 25, 230);
         ctx.set_visuals(visuals);
 
         egui::CentralPanel::default()
-            .frame(egui::Frame::none().rounding(18.0).inner_margin(egui::Margin::symmetric(14.0, 6.0)))
+            .frame(egui::Frame::none().rounding(16.0).inner_margin(egui::Margin::symmetric(12.0, 6.0)))
             .show(ctx, |ui| {
-                ui.colored_label(color, egui::RichText::new(label).size(13.0).strong());
+                ui.colored_label(color, egui::RichText::new(label).size(12.0).strong());
             });
 
         ctx.request_repaint_after(std::time::Duration::from_millis(200));
