@@ -76,6 +76,13 @@ pub fn run() {
                                 });
                                 *hotkey_rec.lock().unwrap() = Some(h);
                                 *hotkey_state.lock().unwrap() = State::Listening;
+                                // auto-start pill
+                                let pill_running = std::process::Command::new("pgrep")
+                                    .arg("-f").arg("typebird-pill").output()
+                                    .map(|o| o.status.success()).unwrap_or(false);
+                                if !pill_running {
+                                    let _ = std::process::Command::new("typebird-pill").spawn();
+                                }
                                 eprintln!("hotkey: listening");
                             } else if cur == State::Listening {
                                 hotkey_samples_stop.store(true, Ordering::Relaxed);
@@ -131,6 +138,14 @@ fn handle_client(
                 });
                 *rec_handle.lock().unwrap() = Some(h);
                 *s = State::Listening;
+                // auto-start pill if not already running
+                let pill_running = std::process::Command::new("pgrep")
+                    .arg("-f").arg("typebird-pill").output()
+                    .map(|o| o.status.success()).unwrap_or(false);
+                if !pill_running {
+                    let _ = std::process::Command::new("typebird-pill")
+                        .spawn();
+                }
                 "ok".to_string()
             } else {
                 "busy".to_string()
