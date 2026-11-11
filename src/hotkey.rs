@@ -3,13 +3,37 @@
 pub fn setup_gnome(key: &str) {
     let path = "/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/typebird/";
     let _ = std::process::Command::new("gsettings")
-        .args(["set", &format!("org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:{}", path), "name", "Typebird"])
+        .args([
+            "set",
+            &format!(
+                "org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:{}",
+                path
+            ),
+            "name",
+            "Typebird",
+        ])
         .output();
     let _ = std::process::Command::new("gsettings")
-        .args(["set", &format!("org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:{}", path), "command", "typebird toggle"])
+        .args([
+            "set",
+            &format!(
+                "org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:{}",
+                path
+            ),
+            "command",
+            "typebird toggle",
+        ])
         .output();
     let _ = std::process::Command::new("gsettings")
-        .args(["set", &format!("org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:{}", path), "binding", key])
+        .args([
+            "set",
+            &format!(
+                "org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:{}",
+                path
+            ),
+            "binding",
+            key,
+        ])
         .output();
     println!("bound {} to 'typebird toggle' (gnome)", key);
 }

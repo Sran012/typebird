@@ -8,16 +8,27 @@ use crate::transcribe;
 use hound::WavWriter;
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
-use std::sync::{Arc, Mutex, atomic::{AtomicBool, Ordering}};
+use std::sync::{
+    Arc, Mutex,
+    atomic::{AtomicBool, Ordering},
+};
 use std::thread;
 use std::time::{Duration, Instant};
 
 #[derive(Clone, Copy, PartialEq, Debug)]
-pub enum State { Ready, Listening, Transcribing }
+pub enum State {
+    Ready,
+    Listening,
+    Transcribing,
+}
 
 impl State {
     pub fn as_str(&self) -> &'static str {
-        match self { State::Ready => "ready", State::Listening => "listening", State::Transcribing => "transcribing" }
+        match self {
+            State::Ready => "ready",
+            State::Listening => "listening",
+            State::Transcribing => "transcribing",
+        }
     }
 }
 
@@ -41,8 +52,11 @@ fn pill_binary() -> std::path::PathBuf {
 
 fn ensure_pill() {
     let running = std::process::Command::new("pgrep")
-        .arg("-x").arg("typebird-pill").output()
-        .map(|o| o.status.success()).unwrap_or(false);
+        .arg("-x")
+        .arg("typebird-pill")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false);
     if !running {
         let _ = std::process::Command::new(pill_binary()).spawn();
     }
@@ -96,9 +110,17 @@ fn toggle_recording(
 ) -> &'static str {
     let cur = *state.lock().unwrap();
     if cur == State::Ready {
-        if start_recording(state, stop_flag, rec_handle) { "listening" } else { "busy" }
+        if start_recording(state, stop_flag, rec_handle) {
+            "listening"
+        } else {
+            "busy"
+        }
     } else if cur == State::Listening {
-        if stop_recording(state, stop_flag, rec_handle) { "stopped" } else { "busy" }
+        if stop_recording(state, stop_flag, rec_handle) {
+            "stopped"
+        } else {
+            "busy"
+        }
     } else {
         "busy"
     }
@@ -121,13 +143,19 @@ fn spawn_hotkey_listener(
                 .file_name()
                 .map(|n| n.to_string_lossy().starts_with("event"))
                 .unwrap_or(false);
-            if !is_event { continue; }
-            let Ok(dev) = evdev::Device::open(&path) else { continue };
+            if !is_event {
+                continue;
+            }
+            let Ok(dev) = evdev::Device::open(&path) else {
+                continue;
+            };
             let name = dev.name().unwrap_or("").to_lowercase();
             if name.contains("ydotool") || name.contains("uinput") || name.contains("typebird") {
                 continue;
             }
-            let Some(keys) = dev.supported_keys() else { continue };
+            let Some(keys) = dev.supported_keys() else {
+                continue;
+            };
             let full_keyboard = keys.contains(evdev::Key::KEY_A)
                 && keys.contains(evdev::Key::KEY_Z)
                 && keys.contains(evdev::Key::KEY_SPACE)
@@ -144,18 +172,25 @@ fn spawn_hotkey_listener(
         let stop_flag = stop_flag.clone();
         let rec_handle = rec_handle.clone();
         thread::spawn(move || {
-            let Ok(mut dev) = evdev::Device::open(&path) else { return };
+            let Ok(mut dev) = evdev::Device::open(&path) else {
+                return;
+            };
             let mut ctrl = false;
             let mut shift = false;
             loop {
                 if let Ok(events) = dev.fetch_events() {
                     for ev in events {
-                        if ev.event_type() != evdev::EventType::KEY { continue; }
+                        if ev.event_type() != evdev::EventType::KEY {
+                            continue;
+                        }
                         let code = ev.code();
                         let val = ev.value();
-                        if code == evdev::Key::KEY_LEFTCTRL.0 || code == evdev::Key::KEY_RIGHTCTRL.0 {
+                        if code == evdev::Key::KEY_LEFTCTRL.0 || code == evdev::Key::KEY_RIGHTCTRL.0
+                        {
                             ctrl = val != 0;
-                        } else if code == evdev::Key::KEY_LEFTSHIFT.0 || code == evdev::Key::KEY_RIGHTSHIFT.0 {
+                        } else if code == evdev::Key::KEY_LEFTSHIFT.0
+                            || code == evdev::Key::KEY_RIGHTSHIFT.0
+                        {
                             shift = val != 0;
                         } else if code == evdev::Key::KEY_D.0 && val == 1 && ctrl && shift {
                             let r = toggle_recording(&state, &stop_flag, &rec_handle);
@@ -174,7 +209,10 @@ pub fn run() {
     let _ = std::fs::remove_file(&path);
     let listener = match UnixListener::bind(&path) {
         Ok(l) => l,
-        Err(e) => { eprintln!("bind failed: {}", e); return; }
+        Err(e) => {
+            eprintln!("bind failed: {}", e);
+            return;
+        }
     };
     eprintln!("typebird daemon listening on {}", path);
 
@@ -208,7 +246,9 @@ fn handle_client(
 ) {
     let mut reader = BufReader::new(stream.try_clone().unwrap());
     let mut line = String::new();
-    if reader.read_line(&mut line).is_err() { return; }
+    if reader.read_line(&mut line).is_err() {
+        return;
+    }
     let cmd = line.trim().to_string();
 
     let resp = match cmd.as_str() {
@@ -217,14 +257,24 @@ fn handle_client(
             s.as_str().to_string()
         }
         "start" => {
-            if start_recording(&state, &stop_flag, &rec_handle) { "ok".to_string() } else { "busy".to_string() }
+            if start_recording(&state, &stop_flag, &rec_handle) {
+                "ok".to_string()
+            } else {
+                "busy".to_string()
+            }
         }
         "stop" => {
-            if stop_recording(&state, &stop_flag, &rec_handle) { "ok".to_string() } else { "not listening".to_string() }
+            if stop_recording(&state, &stop_flag, &rec_handle) {
+                "ok".to_string()
+            } else {
+                "not listening".to_string()
+            }
         }
         "cancel" => {
             stop_flag.store(true, Ordering::Relaxed);
-            if let Some(h) = rec_handle.lock().unwrap().take() { let _ = h.join(); }
+            if let Some(h) = rec_handle.lock().unwrap().take() {
+                let _ = h.join();
+            }
             *state.lock().unwrap() = State::Ready;
             "ok".to_string()
         }
@@ -244,7 +294,10 @@ fn recording_loop(stop: Arc<AtomicBool>, state: Arc<Mutex<State>>) {
     let host = cpal::default_host();
     let device = match host.default_input_device() {
         Some(d) => d,
-        None => { eprintln!("no input device"); return; }
+        None => {
+            eprintln!("no input device");
+            return;
+        }
     };
 
     let config = cpal::StreamConfig {
@@ -268,7 +321,10 @@ fn recording_loop(stop: Arc<AtomicBool>, state: Arc<Mutex<State>>) {
         None,
     ) {
         Ok(s) => s,
-        Err(e) => { eprintln!("build stream failed: {}", e); return; }
+        Err(e) => {
+            eprintln!("build stream failed: {}", e);
+            return;
+        }
     };
 
     if stream.play().is_err() {
@@ -316,20 +372,28 @@ fn recording_loop(stop: Arc<AtomicBool>, state: Arc<Mutex<State>>) {
 }
 
 fn process_chunk(chunk: &[i16], prev_ended: bool, is_last: bool) -> bool {
-    if chunk.len() < 8000 { return prev_ended; } // skip tiny chunks
+    if chunk.len() < 8000 {
+        return prev_ended;
+    } // skip tiny chunks
     // rms check: skip silent chunks, whisper hallucinates on silence
-    let rms: f64 = (chunk.iter().map(|&s| (s as f64).powi(2)).sum::<f64>() / chunk.len() as f64).sqrt() / 32768.0;
+    let rms: f64 = (chunk.iter().map(|&s| (s as f64).powi(2)).sum::<f64>() / chunk.len() as f64)
+        .sqrt()
+        / 32768.0;
     if rms < 0.005 {
         eprintln!("chunk: (silent, rms={:.4}, skipping)", rms);
         return prev_ended;
     }
     let wav_path = "/tmp/typebird-chunk.wav";
     let spec = hound::WavSpec {
-        channels: 1, sample_rate: 16000, bits_per_sample: 16,
+        channels: 1,
+        sample_rate: 16000,
+        bits_per_sample: 16,
         sample_format: hound::SampleFormat::Int,
     };
     if let Ok(mut w) = WavWriter::create(wav_path, spec) {
-        for &s in chunk { let _ = w.write_sample(s); }
+        for &s in chunk {
+            let _ = w.write_sample(s);
+        }
         let _ = w.finalize();
     }
 
@@ -342,7 +406,9 @@ fn process_chunk(chunk: &[i16], prev_ended: bool, is_last: bool) -> bool {
     // drop trailing punctuation on non-last chunks (short pause between chunks)
     if !is_last {
         let t = text.trim_end_matches(['.', '?', '!']).trim().to_string();
-        if !t.is_empty() { text = t; }
+        if !t.is_empty() {
+            text = t;
+        }
     }
     if !text.is_empty() {
         eprintln!("chunk: {}", text);

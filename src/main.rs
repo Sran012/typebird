@@ -1,9 +1,9 @@
 // entrypoint. `typebird daemon` runs the daemon. anything else is a client
 // command sent over the unix socket.
 mod daemon;
-mod inject;
-mod hotkey;
 mod doctor;
+mod hotkey;
+mod inject;
 mod models;
 mod paths;
 mod seam;

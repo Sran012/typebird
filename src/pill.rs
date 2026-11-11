@@ -149,9 +149,7 @@ impl eframe::App for PillApp {
 
         if show != self.shown {
             if show {
-                ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(
-                    PILL_W, PILL_H,
-                )));
+                ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(PILL_W, PILL_H)));
                 ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(bottom_center(ctx)));
                 ctx.send_viewport_cmd(egui::ViewportCommand::WindowLevel(
                     egui::WindowLevel::AlwaysOnTop,
