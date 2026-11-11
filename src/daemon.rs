@@ -65,6 +65,7 @@ fn ensure_pill() {
 fn start_recording(
     state: &Arc<Mutex<State>>,
     stop_flag: &Arc<AtomicBool>,
+    discard_flag: &Arc<AtomicBool>,
     rec_handle: &Arc<Mutex<Option<thread::JoinHandle<()>>>>,
 ) -> bool {
     {
@@ -75,9 +76,11 @@ fn start_recording(
         *s = State::Listening;
     }
     stop_flag.store(false, Ordering::Relaxed);
+    discard_flag.store(false, Ordering::Relaxed);
     let stop = stop_flag.clone();
+    let discard = discard_flag.clone();
     let st = state.clone();
-    let h = thread::spawn(move || recording_loop(stop, st));
+    let h = thread::spawn(move || recording_loop(stop, discard, st));
     *rec_handle.lock().unwrap() = Some(h);
     ensure_pill();
     true
@@ -106,11 +109,12 @@ fn stop_recording(
 fn toggle_recording(
     state: &Arc<Mutex<State>>,
     stop_flag: &Arc<AtomicBool>,
+    discard_flag: &Arc<AtomicBool>,
     rec_handle: &Arc<Mutex<Option<thread::JoinHandle<()>>>>,
 ) -> &'static str {
     let cur = *state.lock().unwrap();
     if cur == State::Ready {
-        if start_recording(state, stop_flag, rec_handle) {
+        if start_recording(state, stop_flag, discard_flag, rec_handle) {
             "listening"
         } else {
             "busy"
@@ -133,6 +137,7 @@ fn toggle_recording(
 fn spawn_hotkey_listener(
     state: Arc<Mutex<State>>,
     stop_flag: Arc<AtomicBool>,
+    discard_flag: Arc<AtomicBool>,
     rec_handle: Arc<Mutex<Option<thread::JoinHandle<()>>>>,
 ) {
     let mut paths: Vec<std::path::PathBuf> = Vec::new();
@@ -170,6 +175,7 @@ fn spawn_hotkey_listener(
     for path in paths {
         let state = state.clone();
         let stop_flag = stop_flag.clone();
+        let discard_flag = discard_flag.clone();
         let rec_handle = rec_handle.clone();
         thread::spawn(move || {
             let Ok(mut dev) = evdev::Device::open(&path) else {
@@ -193,7 +199,8 @@ fn spawn_hotkey_listener(
                         {
                             shift = val != 0;
                         } else if code == evdev::Key::KEY_D.0 && val == 1 && ctrl && shift {
-                            let r = toggle_recording(&state, &stop_flag, &rec_handle);
+                            let r =
+                                toggle_recording(&state, &stop_flag, &discard_flag, &rec_handle);
                             eprintln!("hotkey: {}", r);
                         }
                     }
@@ -221,9 +228,15 @@ pub fn run() {
 
     let state = Arc::new(Mutex::new(State::Ready));
     let stop_flag = Arc::new(AtomicBool::new(false));
+    let discard_flag = Arc::new(AtomicBool::new(false));
     let rec_handle: Arc<Mutex<Option<thread::JoinHandle<()>>>> = Arc::new(Mutex::new(None));
 
-    spawn_hotkey_listener(state.clone(), stop_flag.clone(), rec_handle.clone());
+    spawn_hotkey_listener(
+        state.clone(),
+        stop_flag.clone(),
+        discard_flag.clone(),
+        rec_handle.clone(),
+    );
 
     for stream in listener.incoming() {
         match stream {
@@ -231,7 +244,8 @@ pub fn run() {
                 let state = state.clone();
                 let stop_flag = stop_flag.clone();
                 let rec_handle = rec_handle.clone();
-                thread::spawn(move || handle_client(s, state, stop_flag, rec_handle));
+                let discard_flag = discard_flag.clone();
+                thread::spawn(move || handle_client(s, state, stop_flag, discard_flag, rec_handle));
             }
             Err(e) => eprintln!("accept error: {}", e),
         }
@@ -242,6 +256,7 @@ fn handle_client(
     mut stream: UnixStream,
     state: Arc<Mutex<State>>,
     stop_flag: Arc<AtomicBool>,
+    discard_flag: Arc<AtomicBool>,
     rec_handle: Arc<Mutex<Option<thread::JoinHandle<()>>>>,
 ) {
     let mut reader = BufReader::new(stream.try_clone().unwrap());
@@ -257,7 +272,7 @@ fn handle_client(
             s.as_str().to_string()
         }
         "start" => {
-            if start_recording(&state, &stop_flag, &rec_handle) {
+            if start_recording(&state, &stop_flag, &discard_flag, &rec_handle) {
                 "ok".to_string()
             } else {
                 "busy".to_string()
@@ -271,6 +286,7 @@ fn handle_client(
             }
         }
         "cancel" => {
+            discard_flag.store(true, Ordering::Relaxed);
             stop_flag.store(true, Ordering::Relaxed);
             if let Some(h) = rec_handle.lock().unwrap().take() {
                 let _ = h.join();
@@ -278,7 +294,7 @@ fn handle_client(
             *state.lock().unwrap() = State::Ready;
             "ok".to_string()
         }
-        "toggle" => toggle_recording(&state, &stop_flag, &rec_handle).to_string(),
+        "toggle" => toggle_recording(&state, &stop_flag, &discard_flag, &rec_handle).to_string(),
         "info" => "typebird daemon".to_string(),
         _ => format!("unknown: {}", cmd),
     };
@@ -288,7 +304,7 @@ fn handle_client(
 
 // the recording loop. records in chunks, transcribes each, types as they come.
 // cuts a chunk every ~5s. silence detection comes later.
-fn recording_loop(stop: Arc<AtomicBool>, state: Arc<Mutex<State>>) {
+fn recording_loop(stop: Arc<AtomicBool>, discard: Arc<AtomicBool>, state: Arc<Mutex<State>>) {
     use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 
     let host = cpal::default_host();
@@ -350,7 +366,7 @@ fn recording_loop(stop: Arc<AtomicBool>, state: Arc<Mutex<State>>) {
             };
 
             if !chunk.is_empty() {
-                prev_ended = process_chunk(&chunk, prev_ended, false);
+                prev_ended = process_chunk(&chunk, prev_ended, false, &discard);
             }
             last_chunk = now;
         }
@@ -363,15 +379,18 @@ fn recording_loop(stop: Arc<AtomicBool>, state: Arc<Mutex<State>>) {
         buf.clear();
         r
     };
-    if !remaining.is_empty() {
-        let _ = process_chunk(&remaining, prev_ended, true);
+    if !remaining.is_empty() && !discard.load(Ordering::Relaxed) {
+        let _ = process_chunk(&remaining, prev_ended, true, &discard);
     }
 
     drop(stream);
     let _ = state; // state flips to Ready in stop_recording
 }
 
-fn process_chunk(chunk: &[i16], prev_ended: bool, is_last: bool) -> bool {
+fn process_chunk(chunk: &[i16], prev_ended: bool, is_last: bool, discard: &AtomicBool) -> bool {
+    if discard.load(Ordering::Relaxed) {
+        return prev_ended;
+    }
     if chunk.len() < 8000 {
         return prev_ended;
     } // skip tiny chunks
@@ -401,6 +420,9 @@ fn process_chunk(chunk: &[i16], prev_ended: bool, is_last: bool) -> bool {
     if raw.is_empty() || raw == "[BLANK_AUDIO]" {
         return prev_ended;
     }
+    if discard.load(Ordering::Relaxed) {
+        return prev_ended;
+    }
     // seam-hiding
     let mut text = seam::clean(&raw, prev_ended);
     // drop trailing punctuation on non-last chunks (short pause between chunks)
@@ -409,6 +431,9 @@ fn process_chunk(chunk: &[i16], prev_ended: bool, is_last: bool) -> bool {
         if !t.is_empty() {
             text = t;
         }
+    }
+    if discard.load(Ordering::Relaxed) {
+        return prev_ended;
     }
     if !text.is_empty() {
         eprintln!("chunk: {}", text);
