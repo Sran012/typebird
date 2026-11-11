@@ -19,7 +19,6 @@ pub fn list() {
 }
 
 pub fn get(name: &str) {
-    println!("downloading model: {}", name);
-    // placeholder - real download comes with install.sh
-    println!("(not implemented yet, grab it manually)");
+    println!("model downloads are handled by the installer for now");
+    println!("place {} in {}", name, crate::paths::model_dir().display());
 }

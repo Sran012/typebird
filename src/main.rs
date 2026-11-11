@@ -71,7 +71,6 @@ fn usage() {
     println!("  info           print engine, recorder, injector");
     println!("  doctor         check audio, model, uinput, daemon");
     println!("  models         list models");
-    println!("  models get X   download model X");
     println!("  hotkey <key>   extra binding for GNOME");
     println!("  type <text>    type text through the virtual keyboard");
     println!();
