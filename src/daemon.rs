@@ -39,12 +39,12 @@ fn socket_path() -> String {
 
 // the pill lives next to the daemon binary once installed.
 fn pill_binary() -> std::path::PathBuf {
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(dir) = exe.parent() {
-            let candidate = dir.join("typebird-pill");
-            if candidate.exists() {
-                return candidate;
-            }
+    if let Ok(exe) = std::env::current_exe()
+        && let Some(dir) = exe.parent()
+    {
+        let candidate = dir.join("typebird-pill");
+        if candidate.exists() {
+            return candidate;
         }
     }
     std::path::PathBuf::from("typebird-pill")

@@ -19,17 +19,17 @@ pub fn clean(text: &str, prev_ended_sentence: bool) -> String {
     }
 
     // 2. lowercase leading capital if mid-sentence
-    if !prev_ended_sentence {
-        if let Some(first) = t.chars().next() {
-            if first.is_uppercase() && first != 'I' {
-                // check it's not an acronym (all caps) or mixed-case name
-                let second = t.chars().nth(1);
-                let is_acronym = second.map(|c| c.is_uppercase()).unwrap_or(false);
-                if !is_acronym {
-                    let rest: String = t.chars().skip(1).collect();
-                    t = format!("{}{}", first.to_lowercase(), rest);
-                }
-            }
+    if !prev_ended_sentence
+        && let Some(first) = t.chars().next()
+        && first.is_uppercase()
+        && first != 'I'
+    {
+        // check it's not an acronym (all caps) or mixed-case name
+        let second = t.chars().nth(1);
+        let is_acronym = second.map(|c| c.is_uppercase()).unwrap_or(false);
+        if !is_acronym {
+            let rest: String = t.chars().skip(1).collect();
+            t = format!("{}{}", first.to_lowercase(), rest);
         }
     }
 
