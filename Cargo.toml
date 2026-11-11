@@ -10,6 +10,7 @@ hound = "3.5"
 evdev = "0.12"
 eframe = "0.29"
 egui = "0.29"
+x11-dl = "2.21"
 
 [[bin]]
 name = "typebird"

@@ -1,9 +1,13 @@
 // overlay pill: small, always on top, bottom-center of the screen.
-// hidden when idle. appears when recording starts and goes away when it stops.
+// hidden when idle, shown while recording.
+//
+// the window is created once and never unmapped. unmapping and remapping makes
+// the window manager focus the pill, and then every keystroke goes to the pill
+// instead of the app you were typing in. instead the window stays mapped and
+// shrinks to 1x1 when idle, so it never takes focus again.
 //
 // on GNOME Wayland a client cannot choose its own window position, so the
-// pill runs through XWayland (X11). that is the only way to pin a normal
-// window to the bottom edge without a shell extension.
+// pill runs through XWayland (X11).
 use eframe::egui;
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
@@ -32,6 +36,94 @@ fn send_cmd(cmd: &str) -> String {
 
 struct PillApp {
     state: String,
+    shown: bool,
+    configured: bool,
+}
+
+// ICCCM: a window with WM_HINTS.input = False never receives keyboard focus.
+// without this the window manager focuses the pill every time it is shown,
+// and typed text goes to the pill instead of the app behind it.
+#[cfg(target_os = "linux")]
+fn make_non_focusable() {
+    use x11_dl::xlib;
+
+    let xlib = match xlib::Xlib::open() {
+        Ok(x) => x,
+        Err(_) => return,
+    };
+    unsafe {
+        let display = (xlib.XOpenDisplay)(std::ptr::null());
+        if display.is_null() {
+            return;
+        }
+        let root = (xlib.XDefaultRootWindow)(display);
+        if let Some(win) = find_pill_window(&xlib, display, root, 0) {
+            let mut hints: xlib::XWMHints = std::mem::zeroed();
+            hints.flags = xlib::InputHint;
+            hints.input = 0;
+            (xlib.XSetWMHints)(display, win, &mut hints);
+            (xlib.XFlush)(display);
+        }
+        (xlib.XCloseDisplay)(display);
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn find_pill_window(
+    xlib: &x11_dl::xlib::Xlib,
+    display: *mut x11_dl::xlib::Display,
+    win: x11_dl::xlib::Window,
+    depth: u32,
+) -> Option<x11_dl::xlib::Window> {
+    use std::ffi::CStr;
+    use x11_dl::xlib;
+
+    if depth > 5 {
+        return None;
+    }
+    unsafe {
+        let mut name: *mut std::os::raw::c_char = std::ptr::null_mut();
+        if (xlib.XFetchName)(display, win, &mut name) != 0 && !name.is_null() {
+            let s = CStr::from_ptr(name).to_string_lossy().into_owned();
+            (xlib.XFree)(name as *mut _);
+            if s == "typebird-pill" {
+                return Some(win);
+            }
+        }
+        let mut root_ret: xlib::Window = 0;
+        let mut parent_ret: xlib::Window = 0;
+        let mut children: *mut xlib::Window = std::ptr::null_mut();
+        let mut nchildren: u32 = 0;
+        if (xlib.XQueryTree)(
+            display,
+            win,
+            &mut root_ret,
+            &mut parent_ret,
+            &mut children,
+            &mut nchildren,
+        ) != 0
+        {
+            for i in 0..nchildren {
+                let child = *children.add(i as usize);
+                if let Some(found) = find_pill_window(xlib, display, child, depth + 1) {
+                    (xlib.XFree)(children as *mut _);
+                    return Some(found);
+                }
+            }
+            if !children.is_null() {
+                (xlib.XFree)(children as *mut _);
+            }
+        }
+    }
+    None
+}
+
+fn bottom_center(ctx: &egui::Context) -> egui::Pos2 {
+    let (mx, my) = ctx
+        .input(|i| i.viewport().monitor_size)
+        .map(|m| (m.x, m.y))
+        .unwrap_or((1920.0, 1080.0));
+    egui::pos2((mx - PILL_W) / 2.0, my - PILL_H - BOTTOM_GAP)
 }
 
 impl eframe::App for PillApp {
@@ -41,32 +133,43 @@ impl eframe::App for PillApp {
     }
 
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        self.state = send_cmd("state");
-
-        // visible only while recording. stop (shortcut or button) hides it
-        // immediately; the final chunk keeps transcribing in the background.
-        let show = self.state == "listening";
-        if !show {
-            ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
-            ctx.request_repaint_after(std::time::Duration::from_millis(150));
-            return;
+        // mark the window non-focusable while it is still hidden, then map it.
+        // mapping a focusable window makes the window manager hand it the
+        // keyboard, which swallows the text meant for the focused app.
+        if !self.configured {
+            make_non_focusable();
+            ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(1.0, 1.0)));
+            ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(bottom_center(ctx)));
+            ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+            self.configured = true;
         }
 
-        // map first, then move. the window manager places a freshly mapped
-        // window itself, so the position has to be reasserted after it is up.
-        ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+        self.state = send_cmd("state");
+        let show = self.state == "listening";
 
-        let (mx, my) = ctx
-            .input(|i| i.viewport().monitor_size)
-            .map(|m| (m.x, m.y))
-            .unwrap_or((1920.0, 1080.0));
-        let x = (mx - PILL_W) / 2.0;
-        let y = my - PILL_H - BOTTOM_GAP;
-        ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(egui::pos2(x, y)));
-        ctx.send_viewport_cmd(egui::ViewportCommand::WindowLevel(
-            egui::WindowLevel::AlwaysOnTop,
-        ));
+        if show != self.shown {
+            if show {
+                ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(
+                    PILL_W, PILL_H,
+                )));
+                ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(bottom_center(ctx)));
+                ctx.send_viewport_cmd(egui::ViewportCommand::WindowLevel(
+                    egui::WindowLevel::AlwaysOnTop,
+                ));
+            } else {
+                // 1x1 transparent, parked at the bottom center. never unmapped,
+                // so it never steals focus from the app being typed into.
+                ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(1.0, 1.0)));
+                ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(bottom_center(ctx)));
+            }
+            self.shown = show;
+        }
+
         ctx.request_repaint_after(std::time::Duration::from_millis(150));
+
+        if !show {
+            return;
+        }
 
         let (dot, label) = match self.state.as_str() {
             "listening" => (egui::Color32::from_rgb(235, 64, 52), "recording"),
@@ -124,11 +227,11 @@ fn main() -> eframe::Result<()> {
 
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([PILL_W, PILL_H])
+            .with_inner_size([1.0, 1.0])
             .with_always_on_top()
             .with_decorations(false)
             .with_transparent(true)
-            .with_resizable(false)
+            .with_resizable(true)
             .with_active(false)
             .with_visible(false),
         ..Default::default()
@@ -140,6 +243,8 @@ fn main() -> eframe::Result<()> {
         Box::new(|_cc| {
             Ok(Box::new(PillApp {
                 state: "ready".to_string(),
+                shown: false,
+                configured: false,
             }))
         }),
     )

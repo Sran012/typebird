@@ -3385,6 +3385,7 @@ dependencies = [
  "egui",
  "evdev",
  "hound",
+ "x11-dl",
 ]
 
 [[package]]
