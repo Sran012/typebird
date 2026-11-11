@@ -160,7 +160,7 @@ if ! id -nG "$USER_NAME" | grep -qw input; then
     fi
 fi
 
-if [ ! -f /etc/udev/rules.d/99-typebird.rules ]; then
+if ! grep -q 'KERNEL=="uinput"' /etc/udev/rules.d/99-typebird.rules 2>/dev/null; then
     if have sudo && have udevadm; then
         echo 'KERNEL=="uinput", MODE="0660", GROUP="input", OPTIONS+="static_node=uinput"' \
             | sudo tee /etc/udev/rules.d/99-typebird.rules >/dev/null
