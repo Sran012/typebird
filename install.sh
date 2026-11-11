@@ -46,30 +46,16 @@ if [ ! -f /etc/udev/rules.d/99-typebird.rules ]; then
     sudo udevadm control --reload-rules 2>/dev/null || true
 fi
 
-# 7. service
-mkdir -p ~/.config/systemd/user
-cat > ~/.config/systemd/user/typebird.service <<'UNIT'
-[Unit]
-Description=typebird dictation daemon
-After=graphical-session.target
+# 7. autostart: daemon and pill come up with the desktop session
+~/.local/bin/typebird install
 
-[Service]
-ExecStart=%h/.local/bin/typebird daemon
-Restart=on-failure
-
-[Install]
-WantedBy=default.target
-UNIT
-systemctl --user daemon-reload 2>/dev/null || true
-systemctl --user enable typebird 2>/dev/null || true
-
-# 8. hotkey (gnome)
-if echo "$DESKTOP" | grep -qi "gnome\|zorin"; then
-    typebird hotkey "<Super>h" 2>/dev/null || true
+# 8. start it now so the shortcut works immediately
+if ! pgrep -x typebird >/dev/null 2>&1; then
+    setsid ~/.local/bin/typebird daemon >/dev/null 2>&1 < /dev/null &
 fi
 
 echo ""
-echo "typebird installed. run:"
-echo "  systemctl --user start typebird"
-echo "  typebird doctor"
-echo "  typebird toggle  (or press your hotkey)"
+echo "typebird installed."
+echo "  hotkey: Ctrl+Shift+D toggles recording"
+echo "  the pill sits at the bottom of the screen with start/stop"
+echo "  typebird doctor   # check audio, model, uinput"

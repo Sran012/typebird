@@ -1,11 +1,11 @@
 // entrypoint. `typebird daemon` runs the daemon. anything else is a client
 // command sent over the unix socket.
-mod audio;
 mod daemon;
 mod inject;
 mod hotkey;
 mod doctor;
 mod models;
+mod paths;
 mod seam;
 mod transcribe;
 
@@ -31,12 +31,35 @@ fn send_cmd(cmd: &str) -> String {
     resp.trim().to_string()
 }
 
+// one-time setup: make the daemon (and the pill it spawns) come up with the
+// desktop session, so the shortcut works without ever opening a terminal.
+fn install_autostart() {
+    let exe = std::env::current_exe().unwrap_or_else(|_| std::path::PathBuf::from("typebird"));
+    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
+    let dir = format!("{}/.config/autostart", home);
+    let _ = std::fs::create_dir_all(&dir);
+    let entry = format!(
+        "[Desktop Entry]\nType=Application\nName=Typebird\nComment=voice typing\nExec={} daemon\nTerminal=false\nNoDisplay=true\nX-GNOME-Autostart-enabled=true\n",
+        exe.display()
+    );
+    let path = format!("{}/typebird.desktop", dir);
+    match std::fs::write(&path, entry) {
+        Ok(_) => {
+            println!("autostart installed: {}", path);
+            println!("next login starts the daemon and pill automatically");
+            println!("hotkey: Ctrl+Shift+D toggles recording");
+        }
+        Err(e) => eprintln!("failed to write {}: {}", path, e),
+    }
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let cmd = args.get(1).map(|s| s.as_str()).unwrap_or("help");
 
     match cmd {
         "daemon" => daemon::run(),
+        "install" | "setup" => install_autostart(),
         "toggle" => println!("{}", send_cmd("toggle")),
         "start" => println!("{}", send_cmd("start")),
         "stop" => println!("{}", send_cmd("stop")),
@@ -50,7 +73,7 @@ fn main() {
             _ => models::list(),
         },
         _ => {
-            println!("typebird: usage: daemon | toggle | start | stop | cancel | state | info");
+            println!("typebird: usage: install | daemon | toggle | start | stop | cancel | state | info | doctor | models");
         }
     }
 }

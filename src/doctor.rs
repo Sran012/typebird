@@ -16,8 +16,8 @@ pub fn run() {
     println!("  uinput: {}", if uinput_ok { "ok" } else { "MISSING" });
 
     // model
-    let model = "/home/sujal/.local/share/voxd/models/ggml-base.en.bin";
-    println!("  model: {}", if std::path::Path::new(model).exists() { "ok" } else { "MISSING" });
+    let model = crate::paths::model_path();
+    println!("  model: {} ({})", if model.exists() { "ok" } else { "MISSING" }, model.display());
 
     // whisper-cli
     let whisper_ok = Command::new("whisper-cli").arg("--help").output().is_ok();

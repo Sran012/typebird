@@ -16,11 +16,10 @@ Early. Daemon, streaming, uinput typing, hotkey, overlay pill, doctor, and insta
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Sran012/typebird/main/install.sh | bash
-systemctl --user enable --now typebird
 typebird doctor
 ```
 
-Bind `typebird toggle` to a key (Super+H by default via the installer). Press it, talk, press again. Text types into the focused window.
+The installer builds the binaries, downloads the model, adds typebird to your desktop autostart, and starts it. A small pill sits at the bottom of the screen with start and stop buttons. Press **Ctrl+Shift+D**, talk, press it again. Text types into whatever window has focus.
 
 ## How it works
 
@@ -43,20 +42,22 @@ graph TD
 
 ## Install
 
-See `install.sh`. It detects your distro, installs system deps, builds from source, downloads the model, sets up the systemd user service, and binds a hotkey.
+See `install.sh`. It detects your distro, installs system deps, builds from source, downloads the model, and adds a desktop autostart entry.
 
 Manual build:
 
 ```bash
 cargo build --release
 cp target/release/typebird ~/.local/bin/
-cp target/release/typebird-pill ~/.local/bin/  # optional overlay
+cp target/release/typebird-pill ~/.local/bin/
+typebird install        # autostart for the daemon and pill
 ```
 
 ## Usage
 
 ```
-typebird daemon          # run the daemon (or use the systemd service)
+typebird install         # autostart the daemon and pill with the desktop session
+typebird daemon          # run the daemon in the foreground
 typebird toggle          # start/stop recording
 typebird start           # explicit start
 typebird stop            # stop, transcribe, type
@@ -66,10 +67,10 @@ typebird info            # engine, recorder, injector in use
 typebird doctor          # what's present, what's missing
 typebird models          # list models
 typebird models get X    # download model X
-typebird hotkey <key>    # bind key (gnome)
+typebird hotkey <key>    # optional extra binding for GNOME
 ```
 
-`typebird-pill` runs the floating indicator. It subscribes to the daemon and shows listening/transcribing/idle state. Never takes focus, clicks pass through.
+The daemon listens for **Ctrl+Shift+D** itself through `/dev/input`, so the shortcut works on any desktop without compositor configuration. The pill is a small always-on-top window at the bottom of the screen; it shows the daemon state and has working start and stop buttons. It never takes keyboard focus, so text keeps going to the window you were typing in.
 
 ## Text injection
 
@@ -102,7 +103,7 @@ The recorder is stopped with SIGINT rather than SIGKILL so it finishes writing a
 
 - voice commands (punctuation, newline, corrections)
 - model downloader that just works (`typebird models get base.en`)
-- KDE and sway hotkey support (gnome only right now)
+- configurable hotkey
 - streaming transcription improvements
 
 ---

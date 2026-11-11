@@ -1,13 +1,20 @@
 // model management. list, get.
-use std::process::Command;
 
 pub fn list() {
-    let dir = "/home/sujal/.local/share/voxd/models";
-    println!("model dir: {}", dir);
-    if let Ok(entries) = std::fs::read_dir(dir) {
-        for e in entries.flatten() {
-            println!("  {}", e.file_name().to_string_lossy());
+    let dir = crate::paths::model_dir();
+    println!("model dir: {}", dir.display());
+    match std::fs::read_dir(&dir) {
+        Ok(entries) => {
+            let mut any = false;
+            for e in entries.flatten() {
+                println!("  {}", e.file_name().to_string_lossy());
+                any = true;
+            }
+            if !any {
+                println!("  (empty, run `typebird models get base.en`)");
+            }
         }
+        Err(_) => println!("  (empty, run `typebird models get base.en`)"),
     }
 }
 

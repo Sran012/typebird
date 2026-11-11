@@ -2,9 +2,13 @@
 use std::process::Command;
 
 pub fn transcribe(wav_path: &str) -> String {
-    let model = "/home/sujal/.local/share/voxd/models/ggml-base.en.bin";
+    let model = crate::paths::model_path().to_string_lossy().to_string();
     let out = Command::new("whisper-cli")
-        .args(["-m", model, "-f", wav_path, "-l", "en", "-t", "4", "-nt"])
+        .arg("-m")
+        .arg(&model)
+        .arg("-f")
+        .arg(wav_path)
+        .args(["-l", "en", "-t", "4", "-nt"])
         .output();
 
     match out {
