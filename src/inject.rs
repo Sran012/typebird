@@ -1,8 +1,13 @@
-// uinput typing. virtual keyboard, us qwerty.
-use evdev::uinput::VirtualDeviceBuilder;
-use evdev::{AttributeSet, EventType, Key};
+// uinput typing. one virtual keyboard, kept alive for the daemon lifetime.
+// creating a device per chunk raced the compositor: the device could be gone
+// before libinput had registered it, so the keys were dropped on the floor.
+use evdev::uinput::{VirtualDevice, VirtualDeviceBuilder};
+use evdev::{AttributeSet, EventType, InputEvent, Key};
+use std::sync::Mutex;
 use std::thread;
 use std::time::Duration;
+
+static DEVICE: Mutex<Option<VirtualDevice>> = Mutex::new(None);
 
 fn char_to_key(c: char) -> Option<Key> {
     match c {
@@ -16,46 +21,66 @@ fn char_to_key(c: char) -> Option<Key> {
         'v' => Some(Key::KEY_V), 'w' => Some(Key::KEY_W), 'x' => Some(Key::KEY_X),
         'y' => Some(Key::KEY_Y), 'z' => Some(Key::KEY_Z),
         ' ' => Some(Key::KEY_SPACE),
+        ',' => Some(Key::KEY_COMMA),
+        '.' => Some(Key::KEY_DOT),
+        '\'' => Some(Key::KEY_APOSTROPHE),
+        '-' => Some(Key::KEY_MINUS),
+        '?' => Some(Key::KEY_SLASH),
+        '!' => Some(Key::KEY_1),
         _ => None,
     }
+}
+
+fn build() -> std::io::Result<VirtualDevice> {
+    let mut keys = AttributeSet::<Key>::new();
+    for k in 0..256u16 {
+        keys.insert(Key(k));
+    }
+    VirtualDeviceBuilder::new()?
+        .name("typebird-kbd")
+        .with_keys(&keys)?
+        .build()
 }
 
 pub fn type_text(text: &str) {
     if text.is_empty() || text == "[BLANK_AUDIO]" {
         return;
     }
-    let mut keys = AttributeSet::<Key>::new();
-    for k in 0..256u16 {
-        keys.insert(Key(k));
-    }
-
-    let builder = match VirtualDeviceBuilder::new() {
-        Ok(b) => b,
-        Err(e) => { eprintln!("uinput open failed: {}", e); return; }
+    let mut guard = match DEVICE.lock() {
+        Ok(g) => g,
+        Err(_) => return,
     };
-    let builder = builder.name("typebird-kbd");
-    let builder = match builder.with_keys(&keys) {
-        Ok(b) => b,
-        Err(e) => { eprintln!("with_keys failed: {}", e); return; }
-    };
-    let mut dev = match builder.build() {
-        Ok(d) => d,
-        Err(e) => { eprintln!("build failed: {}", e); return; }
-    };
-
-    for c in text.chars() {
-        if let Some(key) = char_to_key(c.to_ascii_lowercase()) {
-            let shift = c.is_uppercase();
-            if shift {
-                let _ = dev.emit(&[evdev::InputEvent::new(EventType::KEY, Key::KEY_LEFTSHIFT.0, 1)]);
+    if guard.is_none() {
+        match build() {
+            Ok(d) => {
+                // give libinput/compositor a moment to register the device
+                // before the first key. only paid once per daemon lifetime.
+                thread::sleep(Duration::from_millis(250));
+                *guard = Some(d);
             }
-            let _ = dev.emit(&[evdev::InputEvent::new(EventType::KEY, key.0, 1)]);
-            let _ = dev.emit(&[evdev::InputEvent::new(EventType::KEY, key.0, 0)]);
-            if shift {
-                let _ = dev.emit(&[evdev::InputEvent::new(EventType::KEY, Key::KEY_LEFTSHIFT.0, 0)]);
+            Err(e) => {
+                eprintln!("uinput: {}", e);
+                return;
             }
-            thread::sleep(Duration::from_millis(10));
         }
     }
-    let _ = dev.emit(&[evdev::InputEvent::new(EventType::SYNCHRONIZATION, 0, 0)]);
+    let dev = guard.as_mut().unwrap();
+
+    for c in text.chars() {
+        let lower = c.to_ascii_lowercase();
+        let Some(key) = char_to_key(lower) else { continue };
+        let shift = c.is_uppercase() || matches!(c, '?' | '!');
+        let mut ev = Vec::with_capacity(5);
+        if shift {
+            ev.push(InputEvent::new(EventType::KEY, Key::KEY_LEFTSHIFT.0, 1));
+        }
+        ev.push(InputEvent::new(EventType::KEY, key.0, 1));
+        ev.push(InputEvent::new(EventType::KEY, key.0, 0));
+        if shift {
+            ev.push(InputEvent::new(EventType::KEY, Key::KEY_LEFTSHIFT.0, 0));
+        }
+        ev.push(InputEvent::new(EventType::SYNCHRONIZATION, 0, 0));
+        let _ = dev.emit(&ev);
+        thread::sleep(Duration::from_millis(8));
+    }
 }

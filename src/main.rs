@@ -64,6 +64,11 @@ fn main() {
         "start" => println!("{}", send_cmd("start")),
         "stop" => println!("{}", send_cmd("stop")),
         "cancel" => println!("{}", send_cmd("cancel")),
+        "type" => {
+            let text = args[2..].join(" ");
+            inject::type_text(&text);
+            println!("typed");
+        }
         "state" => println!("{}", send_cmd("state")),
         "info" => println!("{}", send_cmd("info")),
         "hotkey" => hotkey::setup_gnome(args.get(2).map(|s| s.as_str()).unwrap_or("<Super>h")),
