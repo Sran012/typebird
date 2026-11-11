@@ -1,12 +1,22 @@
-# typebird
+<p align="center">
+  <img src="assets/typebird-banner.png" alt="typebird: voice typing for Linux" width="800">
+</p>
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![GitHub stars](https://img.shields.io/github/stars/Sran012/typebird?style=social)](https://github.com/Sran012/typebird/stargazers)
-[![GitHub forks](https://img.shields.io/github/forks/Sran012/typebird?style=social)](https://github.com/Sran012/typebird/network/members)
+<h1 align="center">typebird</h1>
 
-Voice typing for Linux. Press a key, talk, and the words appear as you speak.
+<p align="center">
+  <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
+  <a href="https://github.com/Sran012/typebird/stargazers"><img src="https://img.shields.io/github/stars/Sran012/typebird?style=social" alt="GitHub stars"></a>
+  <a href="https://github.com/Sran012/typebird/network/members"><img src="https://img.shields.io/github/forks/Sran012/typebird?style=social" alt="GitHub forks"></a>
+</p>
 
-Works on X11 and Wayland, GNOME and KDE. Two small binaries, no webview, no cloud.
+<p align="center">
+  Voice typing for Linux. Press a key, talk, and the words appear as you speak.
+</p>
+
+<p align="center">
+  Works on X11 and Wayland, GNOME and KDE. Two small binaries, no webview, no cloud.
+</p>
 
 ## Status
 
