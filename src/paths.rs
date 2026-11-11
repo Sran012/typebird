@@ -35,3 +35,21 @@ pub fn vad_model_path() -> Option<PathBuf> {
     let p = model_dir().join("ggml-silero-v5.1.2.bin");
     if p.exists() { Some(p) } else { None }
 }
+
+// the bundled whisper-cli lives next to typebird in the release tarball, or
+// in the typebird data dir once installed. fall back to PATH for source builds.
+pub fn whisper_cli() -> PathBuf {
+    if let Ok(exe) = std::env::current_exe()
+        && let Some(dir) = exe.parent()
+    {
+        let candidate = dir.join("whisper-cli");
+        if candidate.exists() {
+            return candidate;
+        }
+    }
+    let bundled = data_home().join("typebird/bin/whisper-cli");
+    if bundled.exists() {
+        return bundled;
+    }
+    PathBuf::from("whisper-cli")
+}

@@ -6,7 +6,7 @@ use std::process::Command;
 
 pub fn transcribe(wav_path: &str) -> String {
     let model = crate::paths::model_path().to_string_lossy().to_string();
-    let mut cmd = Command::new("whisper-cli");
+    let mut cmd = Command::new(crate::paths::whisper_cli());
     cmd.arg("-m")
         .arg(&model)
         .arg("-f")
