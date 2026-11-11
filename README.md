@@ -4,9 +4,9 @@
 [![GitHub stars](https://img.shields.io/github/stars/Sran012/typebird?style=social)](https://github.com/Sran012/typebird/stargazers)
 [![GitHub forks](https://img.shields.io/github/forks/Sran012/typebird?style=social)](https://github.com/Sran012/typebird/network/members)
 
-Voice typing for Linux. One binary, one model, every app.
+Voice typing for Linux. Press a key, talk, and the words appear as you speak.
 
-Press a hotkey, talk, text appears in whatever has focus. Works on X11 and Wayland, GNOME and KDE. Single static binary.
+Works on X11 and Wayland, GNOME and KDE. Two small binaries, no webview, no cloud.
 
 ## Status
 
@@ -19,7 +19,7 @@ curl -fsSL https://raw.githubusercontent.com/Sran012/typebird/main/install.sh | 
 typebird doctor
 ```
 
-The installer builds the binaries, downloads the model, adds typebird to your desktop autostart, and starts it. A small pill sits at the bottom of the screen with start and stop buttons. Press **Ctrl+Shift+D**, talk, press it again. Text types into whatever window has focus.
+The installer builds the binaries, downloads the model, adds typebird to your desktop autostart, and starts it. A small pill appears at the bottom of the screen while you record. Press **Ctrl+Shift+D**, talk, press it again or click stop. Text types into whatever window has focus.
 
 ## How it works
 
@@ -38,7 +38,7 @@ graph TD
 - Audio capture via cpal (PipeWire / PulseAudio / ALSA, autodetected)
 - Transcription via whisper.cpp (`whisper-cli`), English model by default
 - Typing via a uinput virtual keyboard. Works identically on X11 and Wayland because it's a kernel input device, not a compositor protocol
-- Recording is streamed in chunks. Silence cuts chunks, never stops recording. Text appears while you speak
+- Recording is streamed in chunks. Text appears while you speak, not all at once when you stop
 
 ## Install
 
@@ -70,7 +70,7 @@ typebird models get X    # download model X
 typebird hotkey <key>    # optional extra binding for GNOME
 ```
 
-The daemon listens for **Ctrl+Shift+D** itself through `/dev/input`, so the shortcut works on any desktop without compositor configuration. The pill is a small always-on-top window at the bottom of the screen; it shows the daemon state and has working start and stop buttons. It never takes keyboard focus, so text keeps going to the window you were typing in.
+The daemon listens for **Ctrl+Shift+D** itself through `/dev/input`, so the shortcut works on any desktop without compositor configuration. The pill is a small always-on-top window at the bottom of the screen; it shows the daemon state and has a working stop button. It never takes keyboard focus, so text keeps going to the window you were typing in.
 
 ## Text injection
 
@@ -78,11 +78,11 @@ By default typebird creates a uinput virtual keyboard. This works on every compo
 
 The cost: a keyboard emits keycodes, not characters, so characters are mapped through a US-QWERTY layout. On a different layout the keycodes are still valid but the characters differ. typebird reports characters it cannot type rather than typing something else. `wtype`/`ydotool`/`xdotool` remain available as fallbacks. Reading the active keymap is on the roadmap.
 
-Security note: write access to `/dev/uinput` is the ability to synthesize arbitrary keystrokes. That's inherent to dictation, but it's a real capability. The shipped udev rule scopes it to the active local session via `uaccess` rather than granting it to a group permanently. Skip it with `install.sh --no-udev` and typebird falls back to an external tool.
+Security note: the hotkey needs read access to your keyboards, and typing needs write access to `/dev/uinput`. Together that is the ability to read every keystroke and synthesize arbitrary ones. That is inherent to a global dictation shortcut, but it is a real capability. The installer adds you to the `input` group and installs a udev rule for `/dev/uinput`. If that is not acceptable, bind a desktop shortcut to `typebird toggle` instead and do not install the hotkey.
 
 ## Streaming
 
-Text appears while you speak, not all at once when you stop. Chunks are cut at silence points. Pauses never stop recording. Tap stop when finished.
+Text appears while you speak, not all at once when you stop. Chunks are cut every few seconds. Pauses never stop recording. Tap stop when finished.
 
 Seam-hiding makes chunk boundaries invisible:
 - strips ellipses whisper writes at chunk edges
@@ -93,7 +93,7 @@ Seam-hiding makes chunk boundaries invisible:
 
 Detected, not assumed: PipeWire, then PulseAudio, then ALSA. Recording is 16 kHz mono s16, which is what the engines want.
 
-The recorder is stopped with SIGINT rather than SIGKILL so it finishes writing a valid WAV header.
+The recorder is stopped cleanly so the last chunk is still transcribed.
 
 ## Models
 
