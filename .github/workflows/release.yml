@@ -90,7 +90,7 @@ jobs:
           cp target/release/typebird "dist/$name/"
           cp target/release/typebird-pill "dist/$name/"
           cp whisper.cpp/build/bin/whisper-cli "dist/$name/"
-          cp install.sh README.md LICENSE "dist/$name/"
+          cp install.sh uninstall.sh README.md LICENSE "dist/$name/"
           cp whisper.cpp/LICENSE "dist/$name/THIRD_PARTY_LICENSES/whisper.cpp-LICENSE"
           tar -C dist -czf "dist/$name.tar.gz" "$name"
           cd dist
