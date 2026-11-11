@@ -43,7 +43,9 @@ impl eframe::App for PillApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.state = send_cmd("state");
 
-        let show = matches!(self.state.as_str(), "listening" | "transcribing");
+        // visible only while recording. stop (shortcut or button) hides it
+        // immediately; the final chunk keeps transcribing in the background.
+        let show = self.state == "listening";
         if !show {
             ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
             ctx.request_repaint_after(std::time::Duration::from_millis(150));

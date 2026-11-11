@@ -29,3 +29,13 @@ pub fn model_path() -> PathBuf {
     }
     primary
 }
+
+// silero VAD model. optional, but without it whisper hallucinates on noise.
+pub fn vad_model_path() -> Option<PathBuf> {
+    let p = model_dir().join("ggml-silero-v5.1.2.bin");
+    if p.exists() {
+        Some(p)
+    } else {
+        None
+    }
+}

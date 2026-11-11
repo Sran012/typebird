@@ -346,7 +346,6 @@ fn process_chunk(chunk: &[i16], prev_ended: bool, is_last: bool) -> bool {
     }
     if !text.is_empty() {
         eprintln!("chunk: {}", text);
-        std::thread::sleep(std::time::Duration::from_millis(500));
         inject::type_text(&text);
     }
     seam::ended_sentence(&text)

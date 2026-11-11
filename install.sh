@@ -35,8 +35,14 @@ mkdir -p "$MODEL_DIR"
 if [ ! -f "$MODEL_DIR/ggml-base.en.bin" ]; then
     echo "  downloading model..."
     curl -L -o "$MODEL_DIR/ggml-base.en.bin" \
-        "https://github.com/ggerganov/whisper.cpp/releases/latest/download/ggml-base.en.bin" 2>/dev/null || \
+        "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.en.bin" 2>/dev/null || \
         echo "  model download failed, grab it manually"
+fi
+if [ ! -f "$MODEL_DIR/ggml-silero-v5.1.2.bin" ]; then
+    echo "  downloading VAD model..."
+    curl -L -o "$MODEL_DIR/ggml-silero-v5.1.2.bin" \
+        "https://huggingface.co/ggml-org/whisper-vad/resolve/main/ggml-silero-v5.1.2.bin" 2>/dev/null || \
+        echo "  VAD download failed, transcription will be noisier"
 fi
 
 # 6. udev rule for uinput
