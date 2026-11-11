@@ -1,5 +1,5 @@
 // overlay pill: small, always on top, bottom-center of the screen.
-// shows the daemon state and has working start/stop buttons.
+// hidden when idle. appears when recording starts and goes away when it stops.
 //
 // on GNOME Wayland a client cannot choose its own window position, so the
 // pill runs through XWayland (X11). that is the only way to pin a normal
@@ -8,7 +8,7 @@ use eframe::egui;
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
 
-const PILL_W: f32 = 252.0;
+const PILL_W: f32 = 214.0;
 const PILL_H: f32 = 46.0;
 const BOTTOM_GAP: f32 = 56.0;
 
@@ -32,14 +32,6 @@ fn send_cmd(cmd: &str) -> String {
 
 struct PillApp {
     state: String,
-    placed: bool,
-}
-
-fn pill_button(text: &str, fill: egui::Color32) -> egui::Button<'static> {
-    egui::Button::new(egui::RichText::new(text).size(12.0).color(egui::Color32::WHITE))
-        .fill(fill)
-        .rounding(11.0)
-        .min_size(egui::vec2(54.0, 24.0))
 }
 
 impl eframe::App for PillApp {
@@ -51,32 +43,32 @@ impl eframe::App for PillApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.state = send_cmd("state");
 
-        // pin to bottom-center. the window is created hidden so the first
-        // frame lands at the right spot instead of jumping from the center.
-        if !self.placed {
-            let (mx, my) = ctx
-                .input(|i| i.viewport().monitor_size)
-                .map(|m| (m.x, m.y))
-                .unwrap_or((1920.0, 1080.0));
-            let x = (mx - PILL_W) / 2.0;
-            let y = my - PILL_H - BOTTOM_GAP;
-            ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(egui::pos2(x, y)));
-            ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
-            self.placed = true;
+        let show = matches!(self.state.as_str(), "listening" | "transcribing");
+        if !show {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
+            ctx.request_repaint_after(std::time::Duration::from_millis(150));
+            return;
         }
 
-        // some WMs drop the above state when a hidden window is mapped late,
-        // so reassert it. cheap, and keeps the pill over every other window.
+        // map first, then move. the window manager places a freshly mapped
+        // window itself, so the position has to be reasserted after it is up.
+        ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+
+        let (mx, my) = ctx
+            .input(|i| i.viewport().monitor_size)
+            .map(|m| (m.x, m.y))
+            .unwrap_or((1920.0, 1080.0));
+        let x = (mx - PILL_W) / 2.0;
+        let y = my - PILL_H - BOTTOM_GAP;
+        ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(egui::pos2(x, y)));
         ctx.send_viewport_cmd(egui::ViewportCommand::WindowLevel(
             egui::WindowLevel::AlwaysOnTop,
         ));
-
-        ctx.request_repaint_after(std::time::Duration::from_millis(200));
+        ctx.request_repaint_after(std::time::Duration::from_millis(150));
 
         let (dot, label) = match self.state.as_str() {
             "listening" => (egui::Color32::from_rgb(235, 64, 52), "recording"),
             "transcribing" => (egui::Color32::from_rgb(245, 158, 11), "transcribing"),
-            "disconnected" => (egui::Color32::from_rgb(120, 120, 124), "no daemon"),
             _ => (egui::Color32::from_rgb(90, 200, 120), "ready"),
         };
 
@@ -101,24 +93,16 @@ impl eframe::App for PillApp {
                     );
 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui
-                            .add(pill_button(
-                                "stop",
-                                egui::Color32::from_rgb(180, 45, 38),
-                            ))
-                            .clicked()
-                        {
+                        let stop = egui::Button::new(
+                            egui::RichText::new("stop")
+                                .size(12.0)
+                                .color(egui::Color32::WHITE),
+                        )
+                        .fill(egui::Color32::from_rgb(180, 45, 38))
+                        .rounding(11.0)
+                        .min_size(egui::vec2(58.0, 24.0));
+                        if ui.add(stop).clicked() {
                             send_cmd("stop");
-                        }
-                        ui.add_space(6.0);
-                        if ui
-                            .add(pill_button(
-                                "start",
-                                egui::Color32::from_rgb(40, 130, 80),
-                            ))
-                            .clicked()
-                        {
-                            send_cmd("start");
                         }
                     });
                 });
@@ -154,7 +138,6 @@ fn main() -> eframe::Result<()> {
         Box::new(|_cc| {
             Ok(Box::new(PillApp {
                 state: "ready".to_string(),
-                placed: false,
             }))
         }),
     )
