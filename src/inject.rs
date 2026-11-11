@@ -84,3 +84,26 @@ pub fn type_text(text: &str) {
         thread::sleep(Duration::from_millis(8));
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn maps_letters_and_punctuation() {
+        assert_eq!(char_to_key('a'), Some(Key::KEY_A));
+        assert_eq!(char_to_key('z'), Some(Key::KEY_Z));
+        assert_eq!(char_to_key(' '), Some(Key::KEY_SPACE));
+        assert_eq!(char_to_key(','), Some(Key::KEY_COMMA));
+        assert_eq!(char_to_key('.'), Some(Key::KEY_DOT));
+        assert_eq!(char_to_key('?'), Some(Key::KEY_SLASH));
+        assert_eq!(char_to_key('!'), Some(Key::KEY_1));
+    }
+
+    #[test]
+    fn ignores_characters_it_cannot_type() {
+        assert_eq!(char_to_key('$'), None);
+        assert_eq!(char_to_key('A'), None);
+        assert_eq!(char_to_key('1'), None);
+    }
+}

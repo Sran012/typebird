@@ -41,3 +41,43 @@ pub fn ended_sentence(text: &str) -> bool {
     let t = text.trim();
     t.ends_with('.') || t.ends_with('?') || t.ends_with('!')
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn strips_ellipsis_at_chunk_seams() {
+        assert_eq!(clean("hello...", true), "hello");
+        assert_eq!(clean("hello…", true), "hello");
+    }
+
+    #[test]
+    fn lowercases_a_mid_sentence_start() {
+        assert_eq!(clean("Testing the type", false), "testing the type");
+    }
+
+    #[test]
+    fn keeps_i_and_acronyms() {
+        assert_eq!(clean("I think so", false), "I think so");
+        assert_eq!(clean("NASA launched", false), "NASA launched");
+    }
+
+    #[test]
+    fn leaves_a_new_sentence_alone() {
+        assert_eq!(clean("Testing the type", true), "Testing the type");
+    }
+
+    #[test]
+    fn strips_surrounding_space() {
+        assert_eq!(clean("  hello  ", true), "hello");
+    }
+
+    #[test]
+    fn spots_a_finished_sentence() {
+        assert!(ended_sentence("done."));
+        assert!(ended_sentence("really?"));
+        assert!(ended_sentence("stop!"));
+        assert!(!ended_sentence("more words"));
+    }
+}
