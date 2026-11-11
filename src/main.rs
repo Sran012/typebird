@@ -53,12 +53,40 @@ fn install_autostart() {
     }
 }
 
+fn usage() {
+    println!("typebird {}", env!("CARGO_PKG_VERSION"));
+    println!();
+    println!("voice typing for linux");
+    println!();
+    println!("usage: typebird <command>");
+    println!();
+    println!("commands:");
+    println!("  install        autostart the daemon and pill with the desktop session");
+    println!("  daemon         run the daemon in the foreground");
+    println!("  toggle         start or stop recording");
+    println!("  start          start recording");
+    println!("  stop           stop, transcribe, type");
+    println!("  cancel         stop without transcribing");
+    println!("  state          print ready, listening, or transcribing");
+    println!("  info           print engine, recorder, injector");
+    println!("  doctor         check audio, model, uinput, daemon");
+    println!("  models         list models");
+    println!("  models get X   download model X");
+    println!("  hotkey <key>   extra binding for GNOME");
+    println!("  type <text>    type text through the virtual keyboard");
+    println!();
+    println!("  -h, --help     show this");
+    println!("  -V, --version  show the version");
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
     let cmd = args.get(1).map(|s| s.as_str()).unwrap_or("help");
 
     match cmd {
         "daemon" => daemon::run(),
+        "help" | "-h" | "--help" => usage(),
+        "-V" | "--version" => println!("typebird {}", env!("CARGO_PKG_VERSION")),
         "install" | "setup" => install_autostart(),
         "toggle" => println!("{}", send_cmd("toggle")),
         "start" => println!("{}", send_cmd("start")),
@@ -77,8 +105,6 @@ fn main() {
             Some("get") => models::get(args.get(3).map(|s| s.as_str()).unwrap_or("base.en")),
             _ => models::list(),
         },
-        _ => {
-            println!("typebird: usage: install | daemon | toggle | start | stop | cancel | state | info | doctor | models");
-        }
+        _ => usage(),
     }
 }
