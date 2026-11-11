@@ -17,6 +17,9 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      - name: shell syntax
+        run: bash -n install.sh uninstall.sh build.sh
+
       - name: tag matches Cargo.toml
         run: |
           tag="${GITHUB_REF_NAME#v}"

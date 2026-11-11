@@ -16,7 +16,10 @@ jobs:
   test:
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
+
+      - name: shell syntax
+        run: bash -n install.sh uninstall.sh build.sh
 
       - name: system deps
         run: |
