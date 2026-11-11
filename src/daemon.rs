@@ -81,7 +81,7 @@ pub fn run() {
                                     .arg("-f").arg("typebird-pill").output()
                                     .map(|o| o.status.success()).unwrap_or(false);
                                 if !pill_running {
-                                    let _ = std::process::Command::new("typebird-pill").spawn();
+                                    let _ = std::process::Command::new("/home/sujal/.local/bin/typebird-pill").spawn();
                                 }
                                 eprintln!("hotkey: listening");
                             } else if cur == State::Listening {
@@ -143,7 +143,7 @@ fn handle_client(
                     .arg("-f").arg("typebird-pill").output()
                     .map(|o| o.status.success()).unwrap_or(false);
                 if !pill_running {
-                    let _ = std::process::Command::new("typebird-pill")
+                    let _ = std::process::Command::new("/home/sujal/.local/bin/typebird-pill")
                         .spawn();
                 }
                 "ok".to_string()

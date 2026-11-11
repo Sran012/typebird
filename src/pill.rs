@@ -28,6 +28,7 @@ fn fetch_state() -> String {
 
 struct PillApp {
     state: String,
+    positioned: bool,
 }
 
 impl eframe::App for PillApp {
@@ -47,25 +48,32 @@ impl eframe::App for PillApp {
             return;
         }
 
-        // position at bottom center
-        if let Some(monitor) = ctx.input(|i| i.viewport().monitor_size) {
-            let win_w = 220.0;
-            let x = (monitor.x - win_w) / 2.0;
-            let y = monitor.y - 80.0;
-            ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(egui::pos2(x, y)));
+        // position at bottom center on first show
+        if !self.positioned {
+            if let Some(monitor) = ctx.input(|i| i.viewport().monitor_size) {
+                let win_w = 220.0;
+                let x = (monitor.x - win_w) / 2.0;
+                let y = monitor.y - 80.0;
+                ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(egui::pos2(x, y)));
+            } else {
+                // fallback: center-ish bottom
+                ctx.send_viewport_cmd(egui::ViewportCommand::OuterPosition(egui::pos2(860.0, 980.0)));
+            }
+            self.positioned = true;
         }
 
         ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+        ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(220.0, 36.0)));
 
         let mut visuals = egui::Visuals::dark();
         visuals.window_fill = egui::Color32::from_rgba_unmultiplied(20, 20, 20, 230);
         ctx.set_visuals(visuals);
 
         egui::CentralPanel::default()
-            .frame(egui::Frame::none().rounding(16.0).inner_margin(egui::Margin::symmetric(10.0, 6.0)))
+            .frame(egui::Frame::none().rounding(18.0).inner_margin(egui::Margin::symmetric(12.0, 6.0)))
             .show(ctx, |ui| {
                 ui.horizontal(|ui| {
-                    ui.colored_label(color, egui::RichText::new(label).size(12.0).strong());
+                    ui.colored_label(color, egui::RichText::new(label).size(13.0).strong());
                     ui.add_space(8.0);
                     if ui.small_button("start").clicked() {
                         send_cmd("start");
@@ -83,7 +91,7 @@ impl eframe::App for PillApp {
 fn main() -> eframe::Result<()> {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([220.0, 32.0])
+            .with_inner_size([220.0, 36.0])
             .with_always_on_top()
             .with_decorations(false)
             .with_transparent(true)
@@ -93,6 +101,6 @@ fn main() -> eframe::Result<()> {
     eframe::run_native(
         "typebird-pill",
         options,
-        Box::new(|_cc| Ok(Box::new(PillApp { state: "ready".to_string() }))),
+        Box::new(|_cc| Ok(Box::new(PillApp { state: "ready".to_string(), positioned: false }))),
     )
 }
