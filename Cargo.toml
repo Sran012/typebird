@@ -1,6 +1,6 @@
 [package]
 name = "typebird"
-version = "0.1.0-rc1"
+version = "0.1.0"
 edition = "2024"
 description = "voice typing for linux. press a key, talk, and the words appear as you speak."
 license = "MIT"
