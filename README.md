@@ -6,7 +6,7 @@
 
 <p align="center">
   <a href="https://github.com/Sran012/typebird/actions/workflows/ci.yml"><img src="https://github.com/Sran012/typebird/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"></a>
-  <a href="https://github.com/Sran012/typebird/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-yellow.svg" alt="License: MIT"></a>
+  <a href="https://github.com/Sran012/typebird/releases/latest"><img src="https://img.shields.io/github/v/release/Sran012/typebird" alt="Latest release"></a>
   <a href="https://github.com/Sran012/typebird/stargazers"><img src="https://img.shields.io/github/stars/Sran012/typebird?style=social" alt="GitHub stars"></a>
   <a href="https://github.com/Sran012/typebird/network/members"><img src="https://img.shields.io/github/forks/Sran012/typebird?style=social" alt="GitHub forks"></a>
 </p>
